@@ -1,0 +1,14 @@
+[project]
+name = "dbus-battery-bank"
+version = "0.1.0"
+description = "Venus OS service managing a bank of JBD UP16S BMS packs as one Victron battery"
+# Matches the Python shipped with the Venus OS versions we target (the deployed
+# reference stack already relies on 3.10+ syntax).
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"
