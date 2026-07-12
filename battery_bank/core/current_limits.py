@@ -128,6 +128,8 @@ def compute_pack_current_limit(
             limit_config.max_amps * limit_config.mosfet_temperature_curve.fraction_at(pack.mosfet_temperature_celsius),
         ),
     ]
+    # Take the minimum of the chain-aggregated and per-pack limits, in case the master knows
+    # something we don't and reduced the aggregated value.
     if chain_limit_amps is not None:
         contributions.append(LimitContribution(LimitSource.CHAIN_MASTER, chain_limit_amps))
     if not _fet_enabled(pack, direction):
