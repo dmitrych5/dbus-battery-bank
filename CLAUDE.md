@@ -183,6 +183,18 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   `Diagnostics`, testable on its own; the core never formats strings.
 - Alarms publish through `/Alarms/...` so VRM notifies immediately.
 
+### Zeroing current limits is itself a hazard
+
+Publishing CCL/DCL of zero commands the inverter to stop — off-grid that blacks out the house.
+Every zero-limit response must therefore be deliberate:
+
+- Staleness thresholds are sized to tolerate multiple consecutive failed polls before reacting;
+  transient read errors never zero the limits.
+- Startup warmup is normal operation, not a fault: until the first complete picture arrives the
+  bank is "not ready" — nothing is published and nothing is alarmed or logged as an error. Only
+  when a startup grace period expires without completeness does it fail loud. A restarting
+  service must never momentarily command the inverter to stop.
+
 ### Error taxonomy
 
 Every failure is handled as exactly one of:

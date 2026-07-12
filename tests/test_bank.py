@@ -39,6 +39,11 @@ def healthy_inputs():
     return BankInputs(packs=make_packs(), shunt=make_shunt())
 
 
+def ready_state():
+    """A ControlState past startup, so staleness responses apply instead of the startup grace."""
+    return ControlState(startup_complete=True, first_step_at=0.0)
+
+
 class TestHealthyBank:
     def step(self):
         return step_bank(CONFIG, ControlState(), healthy_inputs(), now_monotonic=1001.0)
@@ -67,10 +72,43 @@ class TestHealthyBank:
         assert all(event.severity is EventSeverity.INFO for event in events)
 
 
+class TestStartupGrace:
+    def test_incomplete_picture_during_grace_is_quiet_and_not_ready(self):
+        inputs = BankInputs(packs=make_packs()[:2], shunt=None)
+        _, decision, events = step_bank(CONFIG, ControlState(), inputs, now_monotonic=1001.0)
+        assert decision.ready is False
+        assert decision.cable_alarm is AlarmSeverity.OK
+        assert events == ()
+
+    def test_grace_expiry_without_complete_picture_fails_loud(self):
+        inputs = BankInputs(packs=make_packs()[:2], shunt=None)
+        state, _, _ = step_bank(CONFIG, ControlState(), inputs, now_monotonic=1001.0)
+        stale_later = BankInputs(packs=make_packs(taken_at=1100.0)[:2], shunt=None)
+        _, decision, events = step_bank(CONFIG, state, stale_later, now_monotonic=1101.0)
+        assert decision.ready is False
+        assert decision.cable_alarm is AlarmSeverity.ALARM
+        assert any(event.severity is EventSeverity.ERROR for event in events)
+
+    def test_completion_during_grace_activates_control(self):
+        incomplete = BankInputs(packs=make_packs()[:2], shunt=None)
+        state, _, _ = step_bank(CONFIG, ControlState(), incomplete, now_monotonic=1001.0)
+        complete = BankInputs(packs=make_packs(taken_at=1002.0), shunt=make_shunt(taken_at=1002.0))
+        _, decision, events = step_bank(CONFIG, state, complete, now_monotonic=1003.0)
+        assert decision.ready is True
+        assert decision.ccl_amps == pytest.approx(30.0)
+        assert any("bank control active" in event.message for event in events)
+
+    def test_readiness_persists_through_later_staleness(self):
+        state, _, _ = step_bank(CONFIG, ready_state(), healthy_inputs(), now_monotonic=1001.0)
+        _, decision, _ = step_bank(CONFIG, state, BankInputs(packs=make_packs()[:2], shunt=make_shunt(taken_at=1001.0)), now_monotonic=1002.0)
+        assert decision.ready is True
+        assert decision.ccl_amps == 0.0
+
+
 class TestPackStaleness:
     def test_stale_pack_zeroes_limits_and_raises_cable_alarm(self):
         packs = make_packs()[:2] + (make_snapshot(unique_id="pack-3", address=3, taken_at_monotonic=900.0),)
-        state, decision, events = step_bank(CONFIG, ControlState(), BankInputs(packs=packs, shunt=make_shunt()), now_monotonic=1001.0)
+        state, decision, events = step_bank(CONFIG, ready_state(), BankInputs(packs=packs, shunt=make_shunt()), now_monotonic=1001.0)
         assert decision.ccl_amps == 0.0
         assert decision.dcl_amps == 0.0
         assert decision.allow_to_charge is False
@@ -79,12 +117,12 @@ class TestPackStaleness:
         assert any(event.severity is EventSeverity.ERROR and "2 of 3 packs" in event.message for event in events)
 
     def test_missing_pack_counts_as_stale(self):
-        _, decision, _ = step_bank(CONFIG, ControlState(), BankInputs(packs=make_packs()[:2], shunt=make_shunt()), now_monotonic=1001.0)
+        _, decision, _ = step_bank(CONFIG, ready_state(), BankInputs(packs=make_packs()[:2], shunt=make_shunt()), now_monotonic=1001.0)
         assert decision.ccl_amps == 0.0
         assert decision.cable_alarm is AlarmSeverity.ALARM
 
     def test_charge_stage_freezes_while_stale(self):
-        state, _, _ = step_bank(CONFIG, ControlState(), healthy_inputs(), now_monotonic=1001.0)
+        state, _, _ = step_bank(CONFIG, ready_state(), healthy_inputs(), now_monotonic=1001.0)
         cvl_before = state.charge_stage.cvl_volts
         state, decision, _ = step_bank(CONFIG, state, BankInputs(packs=make_packs()[:2], shunt=make_shunt()), now_monotonic=1002.0)
         assert state.charge_stage.cvl_volts == cvl_before
@@ -92,14 +130,14 @@ class TestPackStaleness:
 
     def test_staleness_events_fire_only_on_edges(self):
         stale_inputs = BankInputs(packs=make_packs()[:2], shunt=make_shunt())
-        state, _, first_events = step_bank(CONFIG, ControlState(), stale_inputs, now_monotonic=1001.0)
+        state, _, first_events = step_bank(CONFIG, ready_state(), stale_inputs, now_monotonic=1001.0)
         stale_inputs_again = BankInputs(packs=make_packs()[:2], shunt=make_shunt(taken_at=1001.0))
         _, _, second_events = step_bank(CONFIG, state, stale_inputs_again, now_monotonic=1002.0)
         assert any("2 of 3" in event.message for event in first_events)
         assert not any("2 of 3" in event.message for event in second_events)
 
     def test_recovery_restores_limits_and_reports_it(self):
-        state, _, _ = step_bank(CONFIG, ControlState(), BankInputs(packs=make_packs()[:2], shunt=make_shunt()), now_monotonic=1001.0)
+        state, _, _ = step_bank(CONFIG, ready_state(), BankInputs(packs=make_packs()[:2], shunt=make_shunt()), now_monotonic=1001.0)
         recovered = BankInputs(packs=make_packs(taken_at=1002.0), shunt=make_shunt(taken_at=1002.0))
         _, decision, events = step_bank(CONFIG, state, recovered, now_monotonic=1003.0)
         assert decision.ccl_amps == pytest.approx(30.0)
@@ -109,7 +147,7 @@ class TestPackStaleness:
 class TestShuntStaleness:
     def test_stale_shunt_zeroes_limits_and_falls_back_to_bms_soc(self):
         inputs = BankInputs(packs=make_packs(), shunt=make_shunt(taken_at=900.0))
-        _, decision, events = step_bank(CONFIG, ControlState(), inputs, now_monotonic=1001.0)
+        _, decision, events = step_bank(CONFIG, ready_state(), inputs, now_monotonic=1001.0)
         assert decision.ccl_amps == 0.0
         assert decision.soc_source is SocSource.BMS
         assert decision.soc_percent == pytest.approx(80.0)
@@ -117,7 +155,7 @@ class TestShuntStaleness:
         assert any(event.severity is EventSeverity.ERROR and "Shunt data stale" in event.message for event in events)
 
     def test_missing_shunt_when_configured_zeroes_limits(self):
-        _, decision, _ = step_bank(CONFIG, ControlState(), BankInputs(packs=make_packs(), shunt=None), now_monotonic=1001.0)
+        _, decision, _ = step_bank(CONFIG, ready_state(), BankInputs(packs=make_packs(), shunt=None), now_monotonic=1001.0)
         assert decision.ccl_amps == 0.0
         assert decision.soc_source is SocSource.BMS
 

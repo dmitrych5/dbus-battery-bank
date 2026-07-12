@@ -9,6 +9,12 @@ Staleness policy: the bank controls only on a complete, fresh picture. If any co
 is stale or missing, the charge stage and limit states freeze, published limits drop to zero,
 and the cable alarm raises. A stale shunt zeroes limits too (it carries the PTC protection
 input and the authoritative current), while SoC falls back to the BMS values.
+
+Zeroing the limits tells the inverter to stop, which can black out an off-grid house — so the
+staleness thresholds are sized to tolerate multiple consecutive failed polls, and startup gets
+special treatment: until the first complete picture arrives, the bank is not ready (nothing
+published, no alarms, no errors), because data sources warming up is normal, not a fault. Only
+when STARTUP_GRACE_SECONDS pass without a complete picture does the incompleteness fail loud.
 """
 
 from dataclasses import dataclass
@@ -28,6 +34,8 @@ from battery_bank.core.protections import ProtectionState, ProtectionsResult, st
 from battery_bank.core.values import AlarmSeverity, BatterySnapshot, PackAlarms, ShuntSnapshot
 
 ALARM_CATEGORIES = tuple(PackAlarms.__dataclass_fields__)
+
+STARTUP_GRACE_SECONDS = 60.0
 
 
 class EventSeverity(Enum):
@@ -62,6 +70,9 @@ class ControlState:
     discharge_limit: CurrentLimitState = CurrentLimitState()
     protections: ProtectionState = ProtectionState()
     staleness: StalenessTracking = StalenessTracking()
+    startup_complete: bool = False
+    """Set once the first complete fresh picture arrived; the bank publishes nothing before."""
+    first_step_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +84,10 @@ class BankInputs:
 
 @dataclass(frozen=True)
 class BankDecision:
+    ready: bool
+    """False until the first complete picture arrives after startup; the publishing layer
+    keeps the D-Bus services unregistered (or their control values unpublished) while False,
+    so a restarting service never momentarily commands the inverter to stop."""
     cvl_volts: float | None
     """None until the bank controlled at least once; the charger offset is added at publishing."""
     ccl_amps: float
@@ -103,6 +118,7 @@ class BankDecision:
 def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monotonic: float) -> tuple[ControlState, BankDecision, tuple[Event, ...]]:
     events: list[Event] = []
     expected_pack_count = sum(len(port.pack_addresses) for port in config.battery_ports)
+    first_step_at = state.first_step_at if state.first_step_at is not None else now_monotonic
 
     fresh_packs = tuple(pack for pack in inputs.packs if now_monotonic - pack.taken_at_monotonic <= config.staleness.pack_data_max_age_seconds)
     all_packs_fresh = len(fresh_packs) == expected_pack_count
@@ -111,7 +127,20 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         not shunt_configured
         or (inputs.shunt is not None and now_monotonic - inputs.shunt.taken_at_monotonic <= config.staleness.shunt_data_max_age_seconds)
     )
-    events += _staleness_edge_events(state.staleness, len(fresh_packs), expected_pack_count, shunt_fresh, shunt_configured)
+
+    picture_complete = all_packs_fresh and shunt_fresh
+    startup_complete = state.startup_complete or picture_complete
+    in_startup_grace = not startup_complete and now_monotonic - first_step_at <= STARTUP_GRACE_SECONDS
+    if picture_complete and not state.startup_complete:
+        events.append(Event(EventSeverity.INFO, "All data sources reporting; bank control active"))
+
+    if in_startup_grace:
+        # Data sources warming up after a start is normal operation: publish nothing and keep
+        # quiet instead of alarming or commanding the inverter to stop.
+        staleness_tracking = state.staleness
+    else:
+        events += _staleness_edge_events(state.staleness, len(fresh_packs), expected_pack_count, shunt_fresh, shunt_configured)
+        staleness_tracking = StalenessTracking(fresh_pack_count=len(fresh_packs), shunt_fresh=shunt_fresh)
 
     aux_voltage = inputs.shunt.aux_voltage_volts if shunt_fresh and inputs.shunt is not None else None
     protections = step_protections(config.protection, state.protections, fresh_packs, aux_voltage, now_monotonic)
@@ -154,9 +183,12 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         charge_limit=charge_limit.state if charge_limit is not None else state.charge_limit,
         discharge_limit=discharge_limit.state if discharge_limit is not None else state.discharge_limit,
         protections=protections.state,
-        staleness=StalenessTracking(fresh_pack_count=len(fresh_packs), shunt_fresh=shunt_fresh),
+        staleness=staleness_tracking,
+        startup_complete=startup_complete,
+        first_step_at=first_step_at,
     )
     decision = BankDecision(
+        ready=startup_complete,
         cvl_volts=cvl_volts,
         ccl_amps=ccl_amps,
         dcl_amps=dcl_amps,
@@ -165,7 +197,7 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         charge_stage=stage,
         **_measurements(inputs, fresh_packs, shunt_fresh),
         alarms=_aggregate_alarms(inputs.packs),
-        cable_alarm=_cable_alarm(all_packs_fresh, shunt_configured, shunt_fresh),
+        cable_alarm=AlarmSeverity.OK if in_startup_grace else _cable_alarm(all_packs_fresh, shunt_configured, shunt_fresh),
         all_packs_fresh=all_packs_fresh,
         shunt_fresh=shunt_fresh,
         request_soc_reset_pack_ids=request_soc_reset_pack_ids,
