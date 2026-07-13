@@ -14,12 +14,12 @@ from tests.test_vedirect import SHUNT_FIELDS, frame_bytes
 PORT = "/dev/ttyUSB0"
 
 
-def pack_status_payload(serial_number=b"SN-1", rated_capacity=10500):
+def pack_status_payload(serial_number=b"SN-1", rated_capacity=10500, cell_voltages=(3301, 3302, 3303, 3304), temperatures=(700, 705)):
     prefix = [0] * 30
     prefix[6] = rated_capacity
     payload = up16s.PackStatus.PREFIX_STRUCT.pack(*prefix)
-    payload += pack(">H4H", 4, 3301, 3302, 3303, 3304)
-    payload += pack(">H2H", 2, 700, 705)
+    payload += pack(f">H{len(cell_voltages)}H", len(cell_voltages), *cell_voltages)
+    payload += pack(f">H{len(temperatures)}H", len(temperatures), *temperatures)
     payload += up16s.PackStatus.SUFFIX_STRUCT.pack(0, 0, 0x0C01, serial_number.ljust(30, b"\x00"))
     return payload
 
@@ -60,9 +60,9 @@ class FakeLink:
         self.reopen_count += 1
 
 
-def make_poller(link, addresses=(1, 2), require_direct_connection=False):
+def make_poller(link, addresses=(1, 2), require_direct_connection=False, cells_per_pack=4):
     config = BatteryPortConfig(device=PORT, pack_addresses=addresses, require_direct_connection=require_direct_connection)
-    return PackPoller(config, link, clock=lambda: 1000.0, sleep=lambda _: None)
+    return PackPoller(config, link, cells_per_pack, clock=lambda: 1000.0, sleep=lambda _: None)
 
 
 def script_full_pack(link, address, repeat=1):
@@ -117,6 +117,12 @@ class TestDiscovery:
         infos = make_poller(link, addresses=(1,), require_direct_connection=True).discover()
         assert infos == {}
 
+    def test_pack_with_wrong_cell_count_is_not_accepted(self):
+        link = FakeLink()
+        script_full_pack(link, 1)
+        infos = make_poller(link, addresses=(1,), cells_per_pack=16).discover()
+        assert infos == {}
+
 
 class TestPolling:
     def discovered_poller(self, link, addresses=(1, 2)):
@@ -137,6 +143,18 @@ class TestPolling:
         assert by_address[1].chain_aggregated_limits is not None
         assert by_address[1].bms_limits.charge_current_amps == pytest.approx(12.0)
         assert by_address[2].chain_aggregated_limits is None
+
+    def test_snapshot_with_deviating_counts_is_dropped(self):
+        """Publishing fixes per-cell and per-sensor D-Bus paths from the first snapshot; a
+        frame with different counts must be treated as a failed poll."""
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(2,))
+        link.respond(2, up16s.PackStatus, pack_status_payload(temperatures=(700, 705, 710)))
+        assert poller.poll() == []
+        link.respond(2, up16s.PackStatus, pack_status_payload(cell_voltages=(3301, 3302, 3303)))
+        assert poller.poll() == []
+        link.respond(2, up16s.PackStatus, pack_status_payload())
+        assert len(poller.poll()) == 1
 
     def test_unresponsive_pack_yields_no_snapshot(self):
         link = FakeLink()

@@ -47,14 +47,17 @@ class Link(Protocol):
 class PackPoller:
     """One poller per serial port; pollers on different ports are independent."""
 
-    def __init__(self, port_config: BatteryPortConfig, link: Link, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, port_config: BatteryPortConfig, link: Link, cells_per_pack: int, clock=time.monotonic, sleep=time.sleep):
         self._port_config = port_config
         self._link = link
+        self._cells_per_pack = cells_per_pack
         self._clock = clock
         self._sleep = sleep
         self._availability = CommandAvailabilityTracker()
         self._identities: dict[int, PackIdentity] = {}
         self._infos: dict[int, PackInfo] = {}
+        self._temperature_counts: dict[int, int] = {}
+        """Sensor count seen at discovery; later snapshots must match (see poll())."""
         self._previous_soc: dict[int, float] = {}
         self._pending_soc_resets: dict[int, float] = {}
 
@@ -73,6 +76,15 @@ class PackPoller:
             status = self._send_retrying_on_interference(address, up16s.PackStatus)
             if status is None:
                 continue
+            if status.cell_count != self._cells_per_pack:
+                logger.error(
+                    "Battery %d reports %d cells but the config says %d per pack; not accepting it until the config matches",
+                    address,
+                    status.cell_count,
+                    self._cells_per_pack,
+                )
+                continue
+            self._temperature_counts[address] = status.temperatures_count
 
             params1 = self._send_optional(address, up16s.PackParams1, attempts=MAX_AVAILABILITY_RETRIES)
             production = build_production_description(params1) if params1 is not None else None
@@ -115,6 +127,19 @@ class PackPoller:
                 if self._link.interference_detected():
                     logger.warning("Another process is interfering with serial communication")
                     self._link.reopen()
+                continue
+            if status.cell_count != self._cells_per_pack or status.temperatures_count != self._temperature_counts[address]:
+                # Publishing fixes the per-cell and per-sensor D-Bus paths from the first
+                # snapshot, so a frame with deviating counts must not flow downstream; treat
+                # it like a failed poll and let staleness handle persistence of the condition.
+                logger.warning(
+                    "Battery %d reported %d cells / %d temperature sensors, expected %d / %d; dropping the snapshot",
+                    address,
+                    status.cell_count,
+                    status.temperatures_count,
+                    self._cells_per_pack,
+                    self._temperature_counts[address],
+                )
                 continue
             params2 = self._send_optional(address, up16s.PackParams2)
             individual_status = self._send_optional(address, up16s.IndividualPackStatus) if address == MASTER_ADDRESS else None

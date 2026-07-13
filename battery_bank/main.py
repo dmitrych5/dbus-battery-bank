@@ -57,7 +57,8 @@ class BatteryBankService:
         self._state_file = state_file
         self._state = self._restore_state()
         self._pack_pollers = [
-            PackPoller(port, SerialLink(port.device, BATTERY_BAUD_RATE, SERIAL_TIMEOUT_SECONDS)) for port in config.battery_ports
+            PackPoller(port, SerialLink(port.device, BATTERY_BAUD_RATE, SERIAL_TIMEOUT_SECONDS), config.cells_per_pack)
+            for port in config.battery_ports
         ]
         self._shunt_poller = (
             ShuntPoller(SerialLink(config.shunt_port, SHUNT_BAUD_RATE, SHUNT_SERIAL_TIMEOUT_SECONDS)) if config.shunt_port is not None else None
