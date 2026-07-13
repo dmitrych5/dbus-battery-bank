@@ -12,6 +12,7 @@ device's flash.
 """
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,13 @@ from battery_bank.core.charge_stage import ChargeStage, ChargeStageState
 from battery_bank.core.protections import ProtectionState, ThermalInertiaState, TripKind, restored_thermal_state
 
 STATE_FILE_VERSION = 1
+
+CVL_PERSIST_QUANTUM_VOLTS = 0.05
+"""The CVL ramps continuously (float transition, controller recovery), so persisting it exactly
+would rewrite the flash every control cycle for the whole ramp. Flooring to this quantum bounds
+writes to one per quantum crossed, and flooring errs low — a slightly lower restored CVL is
+always the safe direction. A reduction smaller than one quantum restores as unreduced, which
+the fresh recovery hold on restore absorbs."""
 
 
 class StateFileError(Exception):
@@ -55,7 +63,7 @@ def to_persisted(state: ControlState, now_wall_seconds: float) -> PersistedState
     return PersistedState(
         tripped=state.protections.tripped,
         charge_stage=state.charge_stage.stage,
-        cvl_volts=state.charge_stage.cvl_volts,
+        cvl_volts=_quantized_cvl(state.charge_stage.cvl_volts),
         thermal=(
             PersistedThermalState(
                 value_estimate=thermal.kalman.value_estimate,
@@ -67,6 +75,13 @@ def to_persisted(state: ControlState, now_wall_seconds: float) -> PersistedState
             else None
         ),
     )
+
+
+def _quantized_cvl(cvl_volts: float | None) -> float | None:
+    if cvl_volts is None:
+        return None
+    # The epsilon keeps an exactly-on-quantum value from flooring one step down on float error.
+    return round(math.floor(cvl_volts / CVL_PERSIST_QUANTUM_VOLTS + 1e-9) * CVL_PERSIST_QUANTUM_VOLTS, 2)
 
 
 def restore_control_state(persisted: PersistedState, config: Config, now_monotonic: float, now_wall_seconds: float) -> ControlState:

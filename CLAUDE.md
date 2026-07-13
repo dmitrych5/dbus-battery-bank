@@ -151,6 +151,11 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 
 - Latched protection trips are persisted (atomic write) and survive restarts — a trip can only be
   cleared deliberately, never by a crash.
+- **Flash wear is a design constraint**: the state file is saved only when its serialized content
+  changed, and no persisted value may change it every control cycle. Continuously-varying values
+  must be quantized (CVL: `CVL_PERSIST_QUANTUM_VOLTS`) or cadence-limited (thermal filter:
+  `THERMAL_SAVE_INTERVAL_SECONDS`) before persisting; any newly persisted value must obey the
+  same rule. Safety latches are exempt — a trip change always writes immediately.
 - Charge-mode state and last-SoC-reset persist across restarts (as the old system did via
   com.victronenergy.settings).
 - DeviceInstance/CustomName via com.victronenergy.settings, Victron-style.

@@ -4,7 +4,7 @@ import pytest
 
 from battery_bank.config import load_config
 from battery_bank.core.bank import BankInputs, ControlState, step_bank
-from battery_bank.core.charge_stage import ChargeStage
+from battery_bank.core.charge_stage import ChargeStage, ChargeStageState
 from battery_bank.core.protections import ProtectionState, TripKind
 from battery_bank.persistence.state_file import (
     PersistedState,
@@ -102,6 +102,27 @@ class TestRestore:
         assert persisted.charge_stage is ChargeStage.BULK
         assert persisted.cvl_volts == pytest.approx(57.6)
         assert persisted.tripped == frozenset()
+
+    def test_cvl_persists_floored_to_the_quantum(self):
+        state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=55.749))
+        assert to_persisted(state, now_wall_seconds=0.0).cvl_volts == pytest.approx(55.70)
+
+    def test_cvl_exactly_on_a_quantum_is_not_floored_down(self):
+        state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=57.6))
+        assert to_persisted(state, now_wall_seconds=0.0).cvl_volts == pytest.approx(57.6)
+
+    def test_cvl_ramp_within_one_quantum_does_not_rewrite_the_file(self, tmp_path):
+        """The float-transition ramp changes the CVL every control cycle; flash writes must be
+        bounded to quantum crossings, not happen per cycle."""
+
+        def state_at(cvl: float) -> ControlState:
+            return ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=cvl))
+
+        store = StateFile(tmp_path / "state.json")
+        assert store.save(to_persisted(state_at(55.749), now_wall_seconds=0.0)) is True
+        assert store.save(to_persisted(state_at(55.748), now_wall_seconds=1.0)) is False
+        assert store.save(to_persisted(state_at(55.701), now_wall_seconds=2.0)) is False
+        assert store.save(to_persisted(state_at(55.699), now_wall_seconds=3.0)) is True
 
 
 class TestThermalRestore:
