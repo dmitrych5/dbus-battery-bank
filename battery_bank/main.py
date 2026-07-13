@@ -155,6 +155,7 @@ class BatteryBankService:
                 serial="battery-bank",
                 initial_values=self._aggregate_values(decision, inputs),
                 writable_paths={"/Settings/ResetProtectionTrips": self._reset_trips_callback},
+                settings=dbus_services.DeviceSettings(dbus_services.AGGREGATE_SETTINGS_GROUP, claim_instance=False),
             )
         if decision.ready:
             for snapshot in inputs.packs:
@@ -165,7 +166,7 @@ class BatteryBankService:
         for unique_id, service in self._pack_services.items():
             snapshot = self._snapshots.get(unique_id)
             if snapshot is not None:
-                service.update(pack_service_values(decision, snapshot))
+                service.update(pack_service_values(self._config, decision, snapshot))
 
     def _ensure_pack_service(self, snapshot: BatterySnapshot, decision: BankDecision) -> None:
         unique_id = snapshot.identity.unique_id
@@ -173,15 +174,17 @@ class BatteryBankService:
             return
         info = self._pack_infos.get(unique_id)
         port_basename = snapshot.identity.port.rsplit("/", 1)[-1]
+        settings = dbus_services.DeviceSettings(dbus_services.pack_settings_group(unique_id), claim_instance=True)
         self._pack_services[unique_id] = dbus_services.DbusBatteryService(
             service_name=f"com.victronenergy.battery.{port_basename}__0x{snapshot.identity.address:02x}",
-            device_instance=dbus_services.claim_pack_device_instance(unique_id),
+            device_instance=settings.device_instance,
             product_id=dbus_services.PACK_PRODUCT_ID,
             product_name="JBD UP16S",
             hardware_version=info.hardware_description if info is not None else None,
             serial=unique_id,
-            initial_values=pack_service_values(decision, snapshot),
+            initial_values=pack_service_values(self._config, decision, snapshot),
             writable_paths={"/Settings/ResetSocTo": lambda path, value, uid=unique_id: self._request_soc_reset(uid, value)},
+            settings=settings,
         )
 
     def _request_soc_reset(self, unique_id: str, soc_percent: float = SOC_RESET_PERCENT) -> bool:

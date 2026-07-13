@@ -5,6 +5,15 @@ Victron battery (plus read-only per-pack services for VRM logging).
 
 Requirements, architecture, and design decisions live in [CLAUDE.md](CLAUDE.md).
 
+## Operations
+
+```sh
+svc -t /service/dbus-battery-bank    # restart
+svc -d /service/dbus-battery-bank    # stop
+svc -u /service/dbus-battery-bank    # start
+tail -f /var/log/dbus-battery-bank/current | tai64nlocal
+```
+
 ## Development
 
 ```sh

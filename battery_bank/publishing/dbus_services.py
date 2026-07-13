@@ -46,22 +46,41 @@ def private_bus_connection() -> dbus.bus.BusConnection:
     return dbus.bus.BusConnection(bus_type)
 
 
-def claim_pack_device_instance(unique_id: str) -> int:
-    """Claims (or reclaims) a VRM device instance for a pack via localsettings, using the
-    previous stack's settings path so existing instances — and with them VRM history — are
-    reused. localsettings assigns the next free instance for previously unseen packs."""
-    settings_id = "".join(character if character.isalnum() else "_" for character in unique_id)
-    settings = SettingsDevice(
-        private_bus_connection(),
-        {"instance": [f"/Settings/Devices/{PACK_SETTINGS_PREFIX}{settings_id}/ClassAndVrmInstance", "battery:1", 0, 0]},
-        eventCallback=None,
-    )
-    return int(settings["instance"].split(":")[1])
+class DeviceSettings:
+    """VRM device instance and custom name via localsettings, reusing the previous stack's
+    settings paths so existing instances and names — and with them VRM history — carry over.
+    localsettings assigns the next free instance for previously unseen devices."""
+
+    def __init__(self, settings_group: str, claim_instance: bool):
+        supported = {"custom_name": [f"/Settings/Devices/{settings_group}/CustomName", "", 0, 0]}
+        if claim_instance:
+            supported["instance"] = [f"/Settings/Devices/{settings_group}/ClassAndVrmInstance", "battery:1", 0, 0]
+        self._settings = SettingsDevice(private_bus_connection(), supported, eventCallback=None)
+
+    @property
+    def device_instance(self) -> int:
+        return int(self._settings["instance"].split(":")[1])
+
+    @property
+    def custom_name(self) -> str | None:
+        return self._settings["custom_name"] or None
+
+    def store_custom_name(self, name: str) -> None:
+        self._settings["custom_name"] = name
+
+
+def pack_settings_group(unique_id: str) -> str:
+    return PACK_SETTINGS_PREFIX + "".join(character if character.isalnum() else "_" for character in unique_id)
+
+
+AGGREGATE_SETTINGS_GROUP = "aggregatebatteries"
 
 
 class DbusBatteryService:
     """One com.victronenergy.battery service. Paths are fixed at creation from the initial
     values; update() pushes new values for existing paths."""
+
+    STATE_RUNNING = 9
 
     def __init__(
         self,
@@ -73,7 +92,9 @@ class DbusBatteryService:
         serial: str,
         initial_values: dict[str, object],
         writable_paths: dict[str, object] | None = None,
+        settings: DeviceSettings | None = None,
     ):
+        self._settings = settings
         self._service = VeDbusService(service_name, private_bus_connection(), register=False)
         self._service.add_path("/Mgmt/ProcessName", "dbus-battery-bank")
         self._service.add_path("/Mgmt/ProcessVersion", f"{__version__} on Python {platform.python_version()}")
@@ -81,13 +102,15 @@ class DbusBatteryService:
         self._service.add_path("/DeviceInstance", device_instance)
         self._service.add_path("/ProductId", product_id)
         self._service.add_path("/ProductName", product_name)
-        self._service.add_path("/CustomName", product_name, writeable=True)
+        custom_name = (settings.custom_name if settings is not None else None) or product_name
+        self._service.add_path("/CustomName", custom_name, writeable=True, onchangecallback=self._custom_name_changed)
         self._service.add_path("/FirmwareVersion", __version__)
         self._service.add_path("/HardwareVersion", hardware_version)
         self._service.add_path("/Serial", serial)
         self._service.add_path("/Connected", 1)
-        self._service.add_path("/State", 0, writeable=True)
-        self._service.add_path("/ErrorCode", 0, writeable=True)
+        self._service.add_path("/State", self.STATE_RUNNING, writeable=True)
+        # None until a real error, so the GUI hides the error row.
+        self._service.add_path("/ErrorCode", None, writeable=True)
         for path, value in initial_values.items():
             self._service.add_path(path, value, writeable=True)
         for path, on_change in (writable_paths or {}).items():
@@ -104,3 +127,8 @@ class DbusBatteryService:
         with self._service as batch:
             batch["/State"] = state
             batch["/ErrorCode"] = error_code
+
+    def _custom_name_changed(self, path: str, value: str):
+        if self._settings is not None:
+            self._settings.store_custom_name(value)
+        return value

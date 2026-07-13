@@ -176,9 +176,20 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   `/Settings/ResetSocTo` validity) work without shipping any QML. This creates a deliberate
   dependency: the old driver's custom GUI must stay installed until phase 2. Trip reset is
   dbus-spy-only in phase 1 (`/Settings/ResetProtectionTrips` = 1 on the aggregate).
-- GUI-v2 pages, phase 2 (post-parity): ship this project's own QML — the Temperatures overview
-  row with the "Ambient" tile replacing the redundant average, a trip-reset control on the
-  aggregate settings page — and drop the dependency on the old driver's GUI install.
+- GUI-v2 pages, phase 2 (post-parity): ship this project's own QML — a trip-reset control on
+  the aggregate settings page — and drop the dependency on the old driver's GUI install (which
+  also stops firmware upgrades from removing the pages). The Ambient tile substitution in the
+  Temperatures row was dropped: the native "Air temperature" row on the battery page proved
+  sufficient in commissioning.
+- Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
+  bank-level, so per-pack float/bulk state has no meaning; the aggregate carries the full
+  diagnostics.
+- Calculated history is not yet implemented (future task): the GUI history screen currently
+  shows only the BMS-provided charge cycles and total Ah drawn. Missing: lifetime min/max
+  voltages/cell voltages/temperatures, voltage alarm counts, deepest/last/average discharge,
+  charged/discharged energy, time since last full charge, plus `/History/Clear` and
+  `/History/CanBeCleared` (their absence makes the GUI show a confusing "reset history on the
+  monitor itself" hint). Needs a small pure accumulator in the core plus persistence.
 - VRM metric workarounds are confined to one module (`vrm_metric_map` or similar) with honest
   names on the inside: corrected temperature → `/History/MinimumStarterVoltage` etc. This is a
   deliberate, contained accommodation of VRM's fixed schema.

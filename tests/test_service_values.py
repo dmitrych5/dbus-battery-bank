@@ -83,7 +83,7 @@ class TestAggregateServiceValues:
 class TestPackServiceValues:
     def test_measurement_and_cell_paths(self):
         decision, inputs = healthy_decision()
-        values = pack_service_values(decision, inputs.packs[0])
+        values = pack_service_values(CONFIG, decision, inputs.packs[0])
         assert values["/Soc"] == pytest.approx(80.0)
         assert values["/Voltages/Cell1"] == pytest.approx(3.3)
         assert values["/Voltages/Sum"] == pytest.approx(52.8)
@@ -97,10 +97,10 @@ class TestPackServiceValues:
         packs = make_packs()[:2] + (make_snapshot(unique_id="pack-3", address=3, ambient_temperature_celsius=45.0),)
         inputs = BankInputs(packs=packs, shunt=make_shunt())
         decision, _ = healthy_decision(inputs)
-        limited = pack_service_values(decision, packs[2])
+        limited = pack_service_values(CONFIG, decision, packs[2])
         assert limited["/Info/MaxChargeCurrent"] == pytest.approx(5.0)
         assert limited["/Info/ChargeLimitation"] == "Ambient temperature"
-        unlimited = pack_service_values(decision, packs[0])
+        unlimited = pack_service_values(CONFIG, decision, packs[0])
         assert unlimited["/Info/MaxChargeCurrent"] == pytest.approx(10.0)
         assert unlimited["/Info/ChargeLimitation"] == "Max current"
 
@@ -110,7 +110,7 @@ class TestPackServiceValues:
 
         pack = make_snapshot(alarms=make_alarms(internal_failure=AlarmSeverity.ALARM))
         decision, _ = healthy_decision()
-        values = pack_service_values(decision, pack)
+        values = pack_service_values(CONFIG, decision, pack)
         assert values["/Alarms/InternalFailure"] == 2
         assert values["/Alarms/LowSoc"] == 0
 
@@ -122,3 +122,10 @@ class TestServiceInternalAlarm:
         assert values["/Alarms/InternalFailure"] == 2
         values = aggregate_service_values(CONFIG, decision, inputs.packs, inputs.shunt)
         assert values["/Alarms/InternalFailure"] == 0
+
+
+class TestPackCvl:
+    def test_pack_publishes_the_bank_cvl_with_charger_offset(self):
+        decision, inputs = healthy_decision()
+        values = pack_service_values(CONFIG, decision, inputs.packs[0])
+        assert values["/Info/MaxChargeVoltage"] == pytest.approx(57.65)
