@@ -58,6 +58,11 @@ for wrapper in "$QT_WASM_DIR"/bin/qt-* "$QT_WASM_DIR"/libexec/qt-*; do
     [ -f "$wrapper" ] && sed -i '' 's|\\|/|g' "$wrapper"
 done
 export QT_HOST_PATH="$TOOLCHAIN_DIR/Qt/$QT_VERSION/macos"
+# The same Windows-built package bakes its original install prefix into its CMake package
+# files and target_qt.conf; point them at the actual location.
+grep -rl "C:/Qt/Qt-$QT_VERSION" "$QT_WASM_DIR/lib/cmake" "$QT_WASM_DIR/bin" "$QT_WASM_DIR/libexec" 2>/dev/null | while read -r file; do
+    sed -i '' "s|C:/Qt/Qt-$QT_VERSION|$QT_WASM_DIR|g" "$file"
+done
 
 echo "*** Emscripten $EMSCRIPTEN ***"
 if [ ! -d "$TOOLCHAIN_DIR/emsdk" ]; then
