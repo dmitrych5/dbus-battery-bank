@@ -128,7 +128,8 @@ class StateFile:
         self._last_saved = text
         return state
 
-    def save(self, state: PersistedState) -> None:
+    def save(self, state: PersistedState) -> bool:
+        """Returns True when the file was actually (re)written."""
         serialized = json.dumps(
             {
                 "version": STATE_FILE_VERSION,
@@ -139,7 +140,7 @@ class StateFile:
             }
         )
         if serialized == self._last_saved:
-            return
+            return False
         temporary_path = self._path.with_suffix(self._path.suffix + ".new")
         with temporary_path.open("w") as file:
             file.write(serialized)
@@ -147,3 +148,4 @@ class StateFile:
             os.fsync(file.fileno())
         os.replace(temporary_path, self._path)
         self._last_saved = serialized
+        return True
