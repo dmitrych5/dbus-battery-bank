@@ -228,14 +228,14 @@ class TestShuntPoller:
         alternating = frame_bytes(SHUNT_FIELDS) + frame_bytes(HISTORY_FIELDS) + frame_bytes(SHUNT_FIELDS) * 2
         link = self.FakeShuntLink([alternating])
         snapshot = ShuntPoller(link, clock=lambda: 1000.0).poll()
-        assert snapshot.charged_energy_total_kwh == pytest.approx(1500.0)
-        assert snapshot.discharged_energy_total_kwh == pytest.approx(1400.0)
+        assert snapshot.history_totals.charged_energy_kwh == pytest.approx(1500.0)
+        assert snapshot.history_totals.discharged_energy_kwh == pytest.approx(1400.0)
+        assert snapshot.history_totals.automatic_sync_count == 250
 
     def test_totals_unknown_until_the_history_frame_arrives(self):
         link = self.FakeShuntLink([frame_bytes(SHUNT_FIELDS) * 3])
         snapshot = ShuntPoller(link, clock=lambda: 1000.0).poll()
-        assert snapshot.charged_energy_total_kwh is None
-        assert snapshot.discharged_energy_total_kwh is None
+        assert snapshot.history_totals is None
 
     def test_interference_triggers_reopen(self):
         link = self.FakeShuntLink([])

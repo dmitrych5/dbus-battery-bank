@@ -145,6 +145,9 @@ def history_service_values(history: HistoryValues, now_wall_seconds: float) -> d
         "/History/HighVoltageAlarms": history.high_voltage_alarm_count,
         "/History/ChargedEnergy": _rounded(history.charged_energy_kwh, 2),
         "/History/DischargedEnergy": _rounded(history.discharged_energy_kwh, 2),
+        "/History/TotalAhDrawn": _negated_ah(history.total_ah_drawn_ah),
+        "/History/FullDischarges": history.full_discharge_count,
+        "/History/AutomaticSyncs": history.automatic_sync_count,
         "/History/TimeSinceLastFullCharge": int(now_wall_seconds - stamp) if stamp is not None else None,
         "/History/CanBeCleared": 1,
         # The stock GUI hides the min/max temperature history rows without this flag.

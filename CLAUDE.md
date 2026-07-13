@@ -235,17 +235,20 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 - Calculated history: a pure accumulator (`core/history.py`) fed once per cycle from the bank
   decision publishes the aggregate's `/History/*` — lifetime min/max voltage, cell voltage and
   temperature, low/high voltage alarm counts (rising edges of the aggregated pack+cell alarms),
-  deepest/last/average discharge, charged/discharged energy, and time since last full charge —
-  plus `/History/Clear` (writable; any non-zero value clears everything) and
-  `/History/CanBeCleared = 1`. Charged/discharged energy comes from the shunt's own lifetime
-  counters (VE.Direct H17/H18, carried from the alternating history frame into every
-  `ShuntSnapshot`): the shunt integrates internally and keeps counting while the service is
-  down; a clear rebases them against a persisted baseline, and totals dropping below the
-  baseline (shunt replaced/reset) restart the baseline at zero. Discharge bookkeeping is
-  cycle-based in the BMV tradition: a cycle runs full charge to full charge (keyed off the
-  decision's FloatTransition entry), where the running cycle depth is finalized as "last
-  discharge" and folded into the average. Depth and energy records only accumulate from
-  shunt-fresh data, because the BMS fallback counts from a different zero.
+  deepest/last/average discharge, charged/discharged energy, cumulative Ah drawn, full
+  discharges, synchronization count, and time since last full charge — plus `/History/Clear`
+  (writable; any non-zero value clears everything) and `/History/CanBeCleared = 1`. The
+  energies, Ah drawn, full-discharge and sync counts come from the shunt's own lifetime
+  counters (VE.Direct H17/H18/H6/H5/H10, carried from the alternating history frame into every
+  `ShuntSnapshot`): the shunt accumulates internally and keeps counting while the service is
+  down; a clear rebases them against persisted baselines, and totals dropping below a baseline
+  (shunt replaced/reset) restart that baseline at zero. The shunt's min/max records
+  (H1–H3, H7–H9) are deliberately not used: records cannot be rebased for `/History/Clear`,
+  and the equivalents computed here key off the bank's own full-charge decision. Discharge
+  bookkeeping is cycle-based in the BMV tradition: a cycle runs full charge to full charge
+  (keyed off the decision's FloatTransition entry), where the running cycle depth is finalized
+  as "last discharge" and folded into the average. Depth and counter records only accumulate
+  from shunt-fresh data, because the BMS fallback counts from a different zero.
   `/Settings/HasTemperature = 1` is published because the stock GUI hides the temperature
   history rows without it (and `/Settings/HasStarterVoltage` deliberately stays absent, so the
   repurposed starter-voltage VRM workaround paths never render as GUI rows). BMS-provided

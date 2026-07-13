@@ -20,10 +20,13 @@ FIELD_SOC_PERMILLE = "SOC"
 FIELD_CONSUMED_MILLIAMP_HOURS = "CE"
 FIELD_AUX_VOLTAGE_MILLIVOLTS = "VS"
 """The shunt reports its Aux input here when the input is configured as starter battery."""
+FIELD_FULL_DISCHARGE_COUNT = "H5"
+FIELD_TOTAL_DRAWN_MILLIAMP_HOURS = "H6"
+FIELD_AUTOMATIC_SYNC_COUNT = "H10"
 FIELD_DISCHARGED_ENERGY_10WH = "H17"
 FIELD_CHARGED_ENERGY_10WH = "H18"
-"""Lifetime energy counters, sent in the device's alternating history frame — a separate frame
-from the measurements, which is why they parse into their own value."""
+"""Lifetime counters, sent in the device's alternating history frame — a separate frame from
+the measurements, which is why they parse into their own value."""
 
 
 @dataclass(frozen=True)
@@ -42,9 +45,15 @@ class ShuntReading:
 
 
 @dataclass(frozen=True)
-class EnergyTotals:
-    charged_kwh: float
-    discharged_kwh: float
+class HistoryTotals:
+    """The device's lifetime counters, converted to display units; drawn Ah as a positive
+    magnitude (the wire value is negative per the device convention)."""
+
+    charged_energy_kwh: float
+    discharged_energy_kwh: float
+    total_ah_drawn_ah: float
+    full_discharge_count: int
+    automatic_sync_count: int
 
 
 class VeDirectParser:
@@ -102,16 +111,25 @@ def parse_shunt_reading(frame: VeDirectFrame) -> ShuntReading | None:
     )
 
 
-def parse_energy_totals(frame: VeDirectFrame) -> EnergyTotals | None:
-    """Extracts the lifetime energy counters from a history frame; None when the frame is
-    invalid or is not the history frame."""
+def parse_history_totals(frame: VeDirectFrame) -> HistoryTotals | None:
+    """Extracts the lifetime counters from a history frame; None when the frame is invalid or
+    is not the history frame."""
     if not frame.checksum_valid:
         return None
     charged_kwh = _scaled_int_field(frame, FIELD_CHARGED_ENERGY_10WH, 100.0)
     discharged_kwh = _scaled_int_field(frame, FIELD_DISCHARGED_ENERGY_10WH, 100.0)
-    if charged_kwh is None or discharged_kwh is None:
+    drawn_ah = _scaled_int_field(frame, FIELD_TOTAL_DRAWN_MILLIAMP_HOURS, 1000.0)
+    full_discharges = _scaled_int_field(frame, FIELD_FULL_DISCHARGE_COUNT, 1.0)
+    syncs = _scaled_int_field(frame, FIELD_AUTOMATIC_SYNC_COUNT, 1.0)
+    if None in (charged_kwh, discharged_kwh, drawn_ah, full_discharges, syncs):
         return None
-    return EnergyTotals(charged_kwh=charged_kwh, discharged_kwh=discharged_kwh)
+    return HistoryTotals(
+        charged_energy_kwh=charged_kwh,
+        discharged_energy_kwh=discharged_kwh,
+        total_ah_drawn_ah=abs(drawn_ah),
+        full_discharge_count=int(full_discharges),
+        automatic_sync_count=int(syncs),
+    )
 
 
 def _scaled_int_field(frame: VeDirectFrame, field: str, divisor: float) -> float | None:

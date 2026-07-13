@@ -1,9 +1,9 @@
 import pytest
 
-from battery_bank.transport.vedirect import VeDirectParser, parse_energy_totals, parse_shunt_reading
+from battery_bank.transport.vedirect import VeDirectParser, parse_history_totals, parse_shunt_reading
 
 SHUNT_FIELDS = {"V": "53000", "I": "-5000", "SOC": "825", "CE": "-17500", "VS": "777"}
-HISTORY_FIELDS = {"H1": "-80000", "H17": "140000", "H18": "150000", "PID": "0xA389"}
+HISTORY_FIELDS = {"H1": "-80000", "H5": "1", "H6": "-52000000", "H10": "250", "H17": "140000", "H18": "150000", "PID": "0xA389"}
 """The device alternates between the measurement frame and this history frame."""
 
 
@@ -84,17 +84,20 @@ class TestParseShuntReading:
         assert parse_shunt_reading(self.valid_frame({**SHUNT_FIELDS, "I": "garbage"})) is None
 
 
-class TestParseEnergyTotals:
+class TestParseHistoryTotals:
     def valid_frame(self, fields):
         return parse_stream(VeDirectParser(), fields=fields)[1]
 
     def test_extracts_lifetime_totals_from_the_history_frame(self):
-        totals = parse_energy_totals(self.valid_frame(HISTORY_FIELDS))
-        assert totals.charged_kwh == pytest.approx(1500.0)
-        assert totals.discharged_kwh == pytest.approx(1400.0)
+        totals = parse_history_totals(self.valid_frame(HISTORY_FIELDS))
+        assert totals.charged_energy_kwh == pytest.approx(1500.0)
+        assert totals.discharged_energy_kwh == pytest.approx(1400.0)
+        assert totals.total_ah_drawn_ah == pytest.approx(52_000.0)
+        assert totals.full_discharge_count == 1
+        assert totals.automatic_sync_count == 250
 
     def test_measurement_frame_yields_no_totals(self):
-        assert parse_energy_totals(self.valid_frame(SHUNT_FIELDS)) is None
+        assert parse_history_totals(self.valid_frame(SHUNT_FIELDS)) is None
 
     def test_history_frame_yields_no_reading(self):
         assert parse_shunt_reading(self.valid_frame(HISTORY_FIELDS)) is None

@@ -8,9 +8,10 @@ is finalized as the "last discharge" and folded into the average, and the lifeti
 record tracks it continuously. Depths are stored as positive magnitudes; the publishing layer
 negates them per the Victron convention.
 
-Charged/discharged energy comes from the shunt's own lifetime counters (it integrates
-internally at high rate and keeps counting while this service is down), published relative to
-a baseline that an operator clear moves up to the current totals.
+Charged/discharged energy, cumulative Ah drawn, full-discharge and synchronization counts come
+from the shunt's own lifetime counters (it accumulates internally and keeps counting while
+this service is down), published relative to baselines that an operator clear moves up to the
+current totals.
 
 Alarm counters count rising edges of the aggregated alarms; an edge tracker of None means "not
 observed yet" (fresh start or restart), so an alarm already active at startup is adopted
@@ -21,7 +22,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Sequence
 
 from battery_bank.core.bank import BankDecision
-from battery_bank.core.values import AlarmSeverity, BatterySnapshot, ShuntSnapshot
+from battery_bank.core.values import AlarmSeverity, BatterySnapshot, ShuntHistoryTotals, ShuntSnapshot
 
 
 @dataclass(frozen=True)
@@ -45,9 +46,16 @@ class HistoryValues:
     discharge_cycle_ah_total: float = 0.0
     charged_energy_kwh: float | None = None
     discharged_energy_kwh: float | None = None
-    """Shunt lifetime total minus the clear baseline; None until totals have been seen."""
+    total_ah_drawn_ah: float | None = None
+    full_discharge_count: int | None = None
+    automatic_sync_count: int | None = None
+    """Shunt lifetime counter minus its clear baseline; None until totals have been seen. The
+    names match ShuntHistoryTotals, which is how SHUNT_COUNTER_FIELDS pairs them up."""
     charged_energy_baseline_kwh: float = 0.0
     discharged_energy_baseline_kwh: float = 0.0
+    total_ah_drawn_baseline_ah: float = 0.0
+    full_discharge_baseline_count: int = 0
+    automatic_sync_baseline_count: int = 0
     last_full_charge_at_wall_seconds: float | None = None
     """Wall clock, not monotonic: the value must stay meaningful across restarts."""
 
@@ -67,18 +75,27 @@ class HistoryState:
     high_voltage_alarm_active: bool | None = None
 
 
+SHUNT_COUNTER_FIELDS = (
+    ("charged_energy_kwh", "charged_energy_baseline_kwh"),
+    ("discharged_energy_kwh", "discharged_energy_baseline_kwh"),
+    ("total_ah_drawn_ah", "total_ah_drawn_baseline_ah"),
+    ("full_discharge_count", "full_discharge_baseline_count"),
+    ("automatic_sync_count", "automatic_sync_baseline_count"),
+)
+"""(published value, clear baseline) pairs; each value field name doubles as the accessor on
+ShuntHistoryTotals."""
+
+
 def clear_history(state: HistoryState) -> HistoryState:
     """Resets everything (the GUI's Clear button writes 1); cleared values re-accumulate from
-    the very next step. The shunt's lifetime energy counters cannot be reset from here, so
-    clearing moves their baselines up to the current totals instead."""
+    the very next step. The shunt's lifetime counters cannot be reset from here, so clearing
+    moves their baselines up to the current totals instead."""
     values = state.values
-    return replace(
-        state,
-        values=HistoryValues(
-            charged_energy_baseline_kwh=values.charged_energy_baseline_kwh + (values.charged_energy_kwh or 0.0),
-            discharged_energy_baseline_kwh=values.discharged_energy_baseline_kwh + (values.discharged_energy_kwh or 0.0),
-        ),
-    )
+    rebased = {
+        baseline_field: getattr(values, baseline_field) + (getattr(values, value_field) or 0)
+        for value_field, baseline_field in SHUNT_COUNTER_FIELDS
+    }
+    return replace(state, values=HistoryValues(**rebased))
 
 
 def step_history(
@@ -96,8 +113,8 @@ def step_history(
         values, "high_voltage_alarm_count", state.high_voltage_alarm_active, decision.alarms.high_voltage, decision.alarms.high_cell_voltage
     )
     values = _track_discharge_depth(values, decision)
-    if shunt is not None and decision.shunt_fresh:
-        values = _track_energy(values, shunt)
+    if shunt is not None and shunt.history_totals is not None and decision.shunt_fresh:
+        values = _track_shunt_counters(values, shunt.history_totals)
     if decision.entered_float_transition:
         values = _complete_charge_cycle(values, now_wall_seconds)
     return HistoryState(
@@ -147,19 +164,18 @@ def _track_discharge_depth(values: HistoryValues, decision: BankDecision) -> His
     )
 
 
-def _track_energy(values: HistoryValues, shunt: ShuntSnapshot) -> HistoryValues:
-    updates: dict[str, float] = {}
-    for direction, total in (("charged", shunt.charged_energy_total_kwh), ("discharged", shunt.discharged_energy_total_kwh)):
-        if total is None:
-            continue
-        baseline = getattr(values, f"{direction}_energy_baseline_kwh")
+def _track_shunt_counters(values: HistoryValues, totals: ShuntHistoryTotals) -> HistoryValues:
+    updates: dict[str, float | int] = {}
+    for value_field, baseline_field in SHUNT_COUNTER_FIELDS:
+        total = getattr(totals, value_field)
+        baseline = getattr(values, baseline_field)
         if total < baseline:
             # The shunt's counters restarted (device replaced or reset): treat it as a new
-            # meter rather than publishing a negative energy.
-            baseline = 0.0
-            updates[f"{direction}_energy_baseline_kwh"] = baseline
-        updates[f"{direction}_energy_kwh"] = total - baseline
-    return replace(values, **updates) if updates else values
+            # meter rather than publishing a negative value.
+            baseline = 0
+            updates[baseline_field] = baseline
+        updates[value_field] = total - baseline
+    return replace(values, **updates)
 
 
 def _complete_charge_cycle(values: HistoryValues, now_wall_seconds: float) -> HistoryValues:

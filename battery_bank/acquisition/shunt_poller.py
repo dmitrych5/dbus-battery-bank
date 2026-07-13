@@ -6,8 +6,8 @@ import logging
 import time
 from typing import Protocol
 
-from battery_bank.core.values import ShuntSnapshot
-from battery_bank.transport.vedirect import EnergyTotals, VeDirectParser, parse_energy_totals, parse_shunt_reading
+from battery_bank.core.values import ShuntHistoryTotals, ShuntSnapshot
+from battery_bank.transport.vedirect import VeDirectParser, parse_history_totals, parse_shunt_reading
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +29,27 @@ class ShuntPoller:
         self._clock = clock
         self._parser = VeDirectParser()
         self._latest: ShuntSnapshot | None = None
-        self._energy_totals: EnergyTotals | None = None
+        self._history_totals: ShuntHistoryTotals | None = None
 
     def poll(self) -> ShuntSnapshot | None:
         """Feeds newly arrived bytes to the parser and returns the latest valid snapshot; the
         control core judges freshness by the snapshot timestamp. The device alternates between
         a measurement frame and a history frame, so each snapshot (made from a measurement
-        frame) carries the energy totals from the last history frame seen."""
+        frame) carries the lifetime totals from the last history frame seen."""
         if self._link.interference_detected():
             # On interference, reopen the port to reset the port settings.
             logger.warning("Interference detected, reopening serial port")
             self._link.reopen()
         for frame in self._parser.feed(self._link.read_available()):
-            totals = parse_energy_totals(frame)
+            totals = parse_history_totals(frame)
             if totals is not None:
-                self._energy_totals = totals
+                self._history_totals = ShuntHistoryTotals(
+                    charged_energy_kwh=totals.charged_energy_kwh,
+                    discharged_energy_kwh=totals.discharged_energy_kwh,
+                    total_ah_drawn_ah=totals.total_ah_drawn_ah,
+                    full_discharge_count=totals.full_discharge_count,
+                    automatic_sync_count=totals.automatic_sync_count,
+                )
             reading = parse_shunt_reading(frame)
             if reading is not None:
                 self._latest = ShuntSnapshot(
@@ -52,7 +58,6 @@ class ShuntPoller:
                     soc_percent=reading.soc_percent,
                     consumed_ah=reading.consumed_ah,
                     aux_voltage_volts=reading.aux_voltage_volts,
-                    charged_energy_total_kwh=self._energy_totals.charged_kwh if self._energy_totals is not None else None,
-                    discharged_energy_total_kwh=self._energy_totals.discharged_kwh if self._energy_totals is not None else None,
+                    history_totals=self._history_totals,
                 )
         return self._latest

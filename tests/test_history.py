@@ -11,7 +11,7 @@ from battery_bank.core.values import AlarmSeverity
 from battery_bank.persistence.state_file import StateFile, StateFileError, to_persisted
 from battery_bank.publishing.service_values import history_service_values
 from tests.factories import make_alarms, make_snapshot
-from tests.test_bank import healthy_inputs, make_packs, make_shunt
+from tests.test_bank import healthy_inputs, make_packs, make_shunt, make_totals
 
 CONFIG = load_config(Path(__file__).parent.parent / "config.example.ini")
 
@@ -117,34 +117,42 @@ class TestDischargeCycles:
         assert state.values.deepest_discharge_ah == pytest.approx(0.0)
 
 
-class TestEnergyFromShuntTotals:
-    def test_totals_publish_relative_to_the_baseline(self):
-        state = stepped(shunt=make_shunt(charged_energy_total_kwh=1500.0, discharged_energy_total_kwh=1400.0))
+class TestShuntCounters:
+    def test_totals_publish_relative_to_the_baselines(self):
+        state = stepped(shunt=make_shunt(history_totals=make_totals()))
         assert state.values.charged_energy_kwh == pytest.approx(1500.0)
         assert state.values.discharged_energy_kwh == pytest.approx(1400.0)
+        assert state.values.total_ah_drawn_ah == pytest.approx(52_000.0)
+        assert state.values.full_discharge_count == 1
+        assert state.values.automatic_sync_count == 250
         state = clear_history(state)
-        state = stepped(state, shunt=make_shunt(charged_energy_total_kwh=1502.5, discharged_energy_total_kwh=1401.0))
+        state = stepped(state, shunt=make_shunt(history_totals=make_totals(charged_energy_kwh=1502.5, automatic_sync_count=251)))
         assert state.values.charged_energy_kwh == pytest.approx(2.5)
-        assert state.values.discharged_energy_kwh == pytest.approx(1.0)
+        assert state.values.discharged_energy_kwh == pytest.approx(0.0)
+        assert state.values.automatic_sync_count == 1
 
     def test_unknown_until_totals_seen(self):
         state = stepped(shunt=None)
         assert state.values.charged_energy_kwh is None
-        state = stepped(state, shunt=make_shunt(charged_energy_total_kwh=None, discharged_energy_total_kwh=None))
+        state = stepped(state, shunt=make_shunt(history_totals=None))
         assert state.values.charged_energy_kwh is None
+        assert state.values.total_ah_drawn_ah is None
+        assert state.values.full_discharge_count is None
 
     def test_stale_shunt_totals_are_ignored(self):
-        state = stepped(shunt=make_shunt(charged_energy_total_kwh=1500.0), shunt_fresh=False)
+        state = stepped(shunt=make_shunt(), shunt_fresh=False)
         assert state.values.charged_energy_kwh is None
 
     def test_shunt_counter_reset_starts_a_new_meter(self):
         """A replaced or reset shunt reports totals below the baseline; the baseline drops to
-        zero instead of the published energy going negative."""
-        state = stepped(shunt=make_shunt(charged_energy_total_kwh=1500.0, discharged_energy_total_kwh=1400.0))
+        zero instead of the published value going negative."""
+        state = stepped(shunt=make_shunt(history_totals=make_totals()))
         state = clear_history(state)
-        state = stepped(state, shunt=make_shunt(charged_energy_total_kwh=3.0, discharged_energy_total_kwh=2.0))
+        state = stepped(state, shunt=make_shunt(history_totals=make_totals(charged_energy_kwh=3.0, discharged_energy_kwh=2.0, total_ah_drawn_ah=40.0, full_discharge_count=0, automatic_sync_count=2)))
         assert state.values.charged_energy_kwh == pytest.approx(3.0)
         assert state.values.discharged_energy_kwh == pytest.approx(2.0)
+        assert state.values.total_ah_drawn_ah == pytest.approx(40.0)
+        assert state.values.automatic_sync_count == 2
 
 
 def populated_values() -> HistoryValues:
@@ -164,6 +172,9 @@ def populated_values() -> HistoryValues:
         discharge_cycle_ah_total=700.0,
         charged_energy_kwh=500.0,
         discharged_energy_kwh=450.0,
+        total_ah_drawn_ah=52_000.0,
+        full_discharge_count=2,
+        automatic_sync_count=300,
         charged_energy_baseline_kwh=1000.0,
         discharged_energy_baseline_kwh=950.0,
         last_full_charge_at_wall_seconds=1_000_000.0,
@@ -173,7 +184,13 @@ def populated_values() -> HistoryValues:
 class TestClear:
     def test_clear_resets_everything_and_rebases_the_energy_counters(self):
         state = clear_history(HistoryState(values=populated_values()))
-        assert state.values == HistoryValues(charged_energy_baseline_kwh=1500.0, discharged_energy_baseline_kwh=1400.0)
+        assert state.values == HistoryValues(
+            charged_energy_baseline_kwh=1500.0,
+            discharged_energy_baseline_kwh=1400.0,
+            total_ah_drawn_baseline_ah=52_000.0,
+            full_discharge_baseline_count=2,
+            automatic_sync_baseline_count=300,
+        )
 
     def test_clear_before_any_energy_totals_keeps_the_baselines(self):
         state = clear_history(HistoryState(values=HistoryValues(charged_energy_baseline_kwh=7.0, minimum_voltage_volts=48.0)))
@@ -212,6 +229,9 @@ class TestHistoryServiceValues:
         assert values["/History/MaximumTemperature"] == pytest.approx(35.0)
         assert values["/History/ChargedEnergy"] == pytest.approx(500.0)
         assert values["/History/DischargedEnergy"] == pytest.approx(450.0)
+        assert values["/History/TotalAhDrawn"] == pytest.approx(-52_000.0)
+        assert values["/History/FullDischarges"] == 2
+        assert values["/History/AutomaticSyncs"] == 300
 
 
 class TestPersistence:

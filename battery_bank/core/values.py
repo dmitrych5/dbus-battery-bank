@@ -103,6 +103,19 @@ class BatterySnapshot:
 
 
 @dataclass(frozen=True)
+class ShuntHistoryTotals:
+    """The shunt's own lifetime counters — it accumulates internally and keeps counting while
+    this service is down. Drawn Ah is a positive magnitude. The field names deliberately match
+    the corresponding HistoryValues counters, which pair them up by name."""
+
+    charged_energy_kwh: float
+    discharged_energy_kwh: float
+    total_ah_drawn_ah: float
+    full_discharge_count: int
+    automatic_sync_count: int
+
+
+@dataclass(frozen=True)
 class ShuntSnapshot:
     taken_at_monotonic: float
     current_amps: float
@@ -110,7 +123,5 @@ class ShuntSnapshot:
     consumed_ah: float
     aux_voltage_volts: float | None
     """PTC thermistor chain voltage on the shunt's Aux input; None if the shunt does not report it."""
-    charged_energy_total_kwh: float | None
-    discharged_energy_total_kwh: float | None
-    """The shunt's own lifetime energy counters — it integrates internally and keeps counting
-    while this service is down. None until its history frame has been seen after a connect."""
+    history_totals: ShuntHistoryTotals | None
+    """None until the shunt's history frame has been seen after a connect."""

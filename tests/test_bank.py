@@ -11,7 +11,7 @@ from battery_bank.core.bank import (
     step_bank,
 )
 from battery_bank.core.charge_stage import ChargeStage
-from battery_bank.core.values import AlarmSeverity, ShuntSnapshot
+from battery_bank.core.values import AlarmSeverity, ShuntHistoryTotals, ShuntSnapshot
 from tests.factories import make_alarms, make_snapshot
 
 CONFIG = load_config(Path(__file__).parent.parent / "config.example.ini")
@@ -23,23 +23,30 @@ def make_packs(taken_at=1000.0, **overrides):
     return tuple(make_snapshot(unique_id=f"pack-{address}", address=address, taken_at_monotonic=taken_at, **overrides) for address in (1, 2, 3))
 
 
-def make_shunt(
-    taken_at=1000.0,
-    current_amps=-5.0,
-    soc_percent=82.5,
-    consumed_ah=-17.5,
-    aux_voltage_volts=0.777,
-    charged_energy_total_kwh=1500.0,
-    discharged_energy_total_kwh=1400.0,
+def make_totals(
+    charged_energy_kwh=1500.0,
+    discharged_energy_kwh=1400.0,
+    total_ah_drawn_ah=52_000.0,
+    full_discharge_count=1,
+    automatic_sync_count=250,
 ):
+    return ShuntHistoryTotals(
+        charged_energy_kwh=charged_energy_kwh,
+        discharged_energy_kwh=discharged_energy_kwh,
+        total_ah_drawn_ah=total_ah_drawn_ah,
+        full_discharge_count=full_discharge_count,
+        automatic_sync_count=automatic_sync_count,
+    )
+
+
+def make_shunt(taken_at=1000.0, current_amps=-5.0, soc_percent=82.5, consumed_ah=-17.5, aux_voltage_volts=0.777, history_totals=make_totals()):
     return ShuntSnapshot(
         taken_at_monotonic=taken_at,
         current_amps=current_amps,
         soc_percent=soc_percent,
         consumed_ah=consumed_ah,
         aux_voltage_volts=aux_voltage_volts,
-        charged_energy_total_kwh=charged_energy_total_kwh,
-        discharged_energy_total_kwh=discharged_energy_total_kwh,
+        history_totals=history_totals,
     )
 
 
