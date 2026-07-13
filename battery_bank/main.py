@@ -27,6 +27,7 @@ from battery_bank.core.protections import reset_trips
 from battery_bank.core.values import BatterySnapshot
 from battery_bank.persistence.state_file import PersistedState, StateFile, StateFileError, restore_control_state, to_persisted
 from battery_bank.publishing import dbus_services
+from battery_bank.publishing.diagnostics_text import diagnostics_values
 from battery_bank.publishing.service_values import aggregate_service_values, pack_service_values
 from battery_bank.transport.serial_link import SerialLink
 
@@ -136,6 +137,11 @@ class BatteryBankService:
         self._persist()
         self._publish(decision, inputs)
 
+    def _aggregate_values(self, decision: BankDecision, inputs: BankInputs) -> dict[str, object]:
+        values = aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt, self._service_internal_alarm)
+        values.update(diagnostics_values(self._config, self._state, decision, inputs.packs, inputs.shunt, time.monotonic()))
+        return values
+
     def _publish(self, decision: BankDecision, inputs: BankInputs) -> None:
         # Registering only once the bank is ready means a restarting service never publishes
         # zero limits during warmup (see the startup grace in core.bank).
@@ -147,7 +153,7 @@ class BatteryBankService:
                 product_name="Battery Bank",
                 hardware_version=None,
                 serial="battery-bank",
-                initial_values=aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt, self._service_internal_alarm),
+                initial_values=self._aggregate_values(decision, inputs),
                 writable_paths={"/Settings/ResetProtectionTrips": self._reset_trips_callback},
             )
         if decision.ready:
@@ -155,7 +161,7 @@ class BatteryBankService:
                 self._ensure_pack_service(snapshot, decision)
 
         if self._aggregate_service is not None:
-            self._aggregate_service.update(aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt, self._service_internal_alarm))
+            self._aggregate_service.update(self._aggregate_values(decision, inputs))
         for unique_id, service in self._pack_services.items():
             snapshot = self._snapshots.get(unique_id)
             if snapshot is not None:

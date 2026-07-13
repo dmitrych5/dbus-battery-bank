@@ -3,8 +3,9 @@
 Another process (typically serial-starter probing the port) can change the serial port
 settings mid-communication. Depending on the setup, such interference can affect communication
 up to almost every attempt, so callers detect it via interference_detected() and reopen the
-port, which restores the communication parameters. Installing the udev rules that exclude the
-ports from serial-starter should make this a non-event; the detection stays as a safety net.
+port, which restores the communication parameters. The install deliberately ships no
+serial-starter exclusion rules (nothing invasive), so probing interference is expected and
+ridden out; exclusion rules can be added later as an optimization.
 """
 
 import logging

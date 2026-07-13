@@ -208,6 +208,10 @@ alarm path, because those are the channel VRM verifiably notifies on:
   invalid config, whose own notification behavior is still to be verified on the device).
 - BMS-reported alarms pass through their natural categories via worst-per-category
   aggregation.
+- Zero CCL/DCL is itself a loud channel: the operator has a VRM notification configured
+  specifically for the published limits reaching zero, independent of any alarm path. Every
+  zero-limit response is therefore noticed even if its accompanying alarm were missed — but
+  each still carries its specific alarm so the notification explains itself.
 
 ### Error taxonomy
 

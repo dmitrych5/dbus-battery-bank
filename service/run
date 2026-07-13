@@ -1,0 +1,4 @@
+#!/bin/sh
+exec 2>&1
+cd /data/apps/dbus-battery-bank || exit 1
+exec /usr/bin/python3 -m battery_bank.main /data/apps/dbus-battery-bank
