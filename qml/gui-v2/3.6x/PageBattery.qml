@@ -203,8 +203,10 @@ Page {
 			}
 
 			ListQuantity {
+				// The dbus-battery-bank aggregate repurposes this path for VRM logging of the
+				// PTC overheat-detection chain voltage (times 10 for resolution).
 				//% "Starter voltage"
-				text: qsTrId("battery_starter_voltage")
+				text: productId.value === 0xBA44 ? "PTC voltage ×10" : qsTrId("battery_starter_voltage")
 				dataItem.uid: root.bindPrefix + "/Dc/1/Voltage"
 				preferredVisible: dataItem.valid
 				unit: VenusOS.Units_Volt_DC
@@ -235,8 +237,10 @@ Page {
 			}
 
 			ListQuantity {
+				// The dbus-battery-bank aggregate repurposes this path for VRM logging of the
+				// PTC voltage deviation from the temperature-based expectation.
 				//% "Mid-point deviation"
-				text: qsTrId("battery_mid_point_deviation")
+				text: productId.value === 0xBA44 ? "PTC deviation" : qsTrId("battery_mid_point_deviation")
 				dataItem.uid: root.bindPrefix + "/Dc/0/MidVoltageDeviation"
 				preferredVisible: dataItem.valid
 				unit: VenusOS.Units_Percentage
