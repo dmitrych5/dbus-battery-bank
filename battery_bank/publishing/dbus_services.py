@@ -95,6 +95,7 @@ class DbusBatteryService:
         settings: DeviceSettings | None = None,
     ):
         self._settings = settings
+        self._command_paths = tuple(writable_paths or ())
         self._service = VeDbusService(service_name, private_bus_connection(), register=False)
         self._service.add_path("/Mgmt/ProcessName", "dbus-battery-bank")
         self._service.add_path("/Mgmt/ProcessVersion", f"{__version__} on Python {platform.python_version()}")
@@ -122,6 +123,12 @@ class DbusBatteryService:
         with self._service as batch:
             for path, value in values.items():
                 batch[path] = value
+            # Re-arm command paths: vedbus's SetValue silently skips writes equal to the
+            # current value without calling the callback, so a command value left latched
+            # (e.g. ResetProtectionTrips stuck at 1) would make every following identical
+            # command a no-op. Setting an already-zero path is signal-free.
+            for path in self._command_paths:
+                batch[path] = 0
 
     def set_error(self, state: int, error_code: int) -> None:
         with self._service as batch:
