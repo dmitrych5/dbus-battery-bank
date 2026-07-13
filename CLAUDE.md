@@ -106,8 +106,9 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 
 ### 2. Acquisition
 
-- One poller per serial port; pollers on different ports are independent and may run
-  concurrently — immutable snapshot handoff to the control loop is the isolation boundary, so
+- One poller per serial port; pollers on different ports are independent and *could* run
+  concurrently (today they run sequentially inside the main-loop cycle — see the open design
+  question on synchronous serial I/O) — immutable snapshot handoff to the control loop is the isolation boundary, so
   adding ports never changes the control side. Snapshots are stamped with a monotonic timestamp
   and carry a stable pack identity (BMS unique ID), so nothing downstream keys on port or
   address: `BatterySnapshot` (per pack: voltage, current, hi-res SoC, SoH, capacities, cell
@@ -233,6 +234,12 @@ Every zero-limit response must therefore be deliberate:
   bank is "not ready" — nothing is published and nothing is alarmed or logged as an error. Only
   when a startup grace period expires without completeness does it fail loud. A restarting
   service must never momentarily command the inverter to stop.
+- If the picture never completes after a start (a pack or the shunt dark since boot), the D-Bus
+  services stay unregistered entirely — no values, current or stale, ever sit on the bus.
+  Operator alerting then deliberately relies on Venus OS itself: with the battery monitor
+  absent, the ESS raises its "BMS connection lost" alarm within a few minutes — the same
+  channel that fires if the service crashes outright. The grace-expiry ERROR log events remain
+  for diagnosis.
 
 ### Operator-visible alarm channels
 
@@ -405,4 +412,15 @@ Next tasks, in priority order:
 
 ## Open design questions
 
-- (none currently)
+- **Synchronous serial I/O in the GLib main loop.** All polling runs inside the 1 s cycle
+  callback. Bounds: a dark pack blocks the loop ~1.5–3 s per cycle (the `SerialLink` deadline
+  is only checked after a blocking read, so the worst case is about twice the 1.5 s timeout);
+  discovery retries under serial interference can block up to 60 s per required command and
+  re-run every 30 s while any configured pack is undiscovered. While blocked, D-Bus requests
+  (GUI/VRM reads, the trip-reset write) wait, SIGTERM handling is delayed, and the shunt is not
+  read — its 30 s staleness budget absorbs realistic stalls. Interference is rare outside the
+  first minute after service start (udev keeps serial-starter off the ports), and with one
+  port the bounds are acceptable; but worst-case stalls stack linearly with added ports. If it
+  ever bites: thread the pollers behind the immutable-snapshot handoff (the architecture
+  already isolates them for exactly this), and/or shorten the discovery interference wait.
+  Deliberately not decided yet; revisit before adding a second battery port.
