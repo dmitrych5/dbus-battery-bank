@@ -8,26 +8,31 @@ cannot patch it, so this project builds its own bundle containing the same page 
 The base is mr-manuel's fork of Victron's gui-v2 (`mr-manuel/venus-os_gui-v2`), which already
 contains the dbus-serialbattery pages this project's services rely on.
 
-## Build
-
-Prerequisites: Docker. On Apple Silicon the upstream toolchain has no Linux ARM64 build, so
-the container must run amd64 through Rosetta:
+## Build (native macOS — the working path)
 
 ```sh
-brew install colima docker
-colima start --vm-type vz --vz-rosetta --cpu 4 --memory 8 --disk 40
+bash scripts/build-wasm-macos.sh          # from the repository root
+tail -f build/wasm-build.log              # watch progress from another terminal (read-only)
 ```
 
-Then:
-
-```sh
-bash scripts/build-wasm-docker.sh
-```
-
-This clones the fork branch, applies `scripts/patch-gui-v2-fork.py`, and runs the fork's own
-build scripts (they pin the Qt and emscripten versions per branch in `scripts/.env`) inside an
-`ubuntu:24.04` container. Expect roughly an hour; the output is
+The script clones the fork branch, applies `scripts/patch-gui-v2-fork.py`, and mirrors the
+fork's own build steps natively: Qt (macOS host + WebAssembly target + CMake/Ninja tools) via
+aqtinstall, emscripten via emsdk (native Apple Silicon binaries), QtMqtt built from source,
+then the qt-cmake/ninja build and the upstream packaging. Everything installs under
+`build/toolchain/` (~4 GB, persistent), so **only the first run downloads — later runs reuse
+the toolchain and go straight to compiling** (minutes, not an hour). Output:
 `build/wasm/venus-webassembly.zip` (untracked — rebuild rather than version binaries).
+
+Toolchain versions (Qt, emscripten) are pinned at the top of `build-wasm-macos.sh` and must
+match the fork branch's `scripts/.env` when switching branches.
+
+## Build (Ubuntu container — fallback, not usable on Apple Silicon)
+
+`scripts/build-wasm-docker.sh` runs the fork's own scripts unmodified in an `ubuntu:24.04`
+container (`docker logs -f wasm-build` to watch). It works on x86 hosts; on Apple Silicon the
+amd64 container must run through Rosetta, under which the emscripten tools **segfault
+intermittently** (observed twice at different steps) — which is why the native build above
+exists. The container is started fresh each run and re-downloads the whole toolchain.
 
 ## Picking the branch for a Venus OS version
 
