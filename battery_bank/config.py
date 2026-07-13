@@ -47,6 +47,7 @@ class ConfigError(Exception):
 class BatteryPortConfig:
     device: str
     pack_addresses: tuple[int, ...]
+    require_direct_connection: bool
 
 
 @dataclass(frozen=True)
@@ -184,8 +185,8 @@ class _IniReader:
     def get_int(self, section: str, key: str, optional: bool = False) -> int | None:
         return self._parse(section, key, int, "an integer", optional)
 
-    def get_bool(self, section: str, key: str) -> bool | None:
-        return self._parse(section, key, _parse_bool, "true or false")
+    def get_bool(self, section: str, key: str, optional: bool = False) -> bool | None:
+        return self._parse(section, key, _parse_bool, "true or false", optional)
 
     def get_curve(self, section: str, key: str) -> LimitCurve | None:
         return self._parse_points(section, key, LimitCurve)
@@ -330,10 +331,11 @@ def _read_battery_ports(reader: _IniReader) -> tuple[BatteryPortConfig, ...]:
     for section in reader.sections_with_prefix(BATTERY_PORT_SECTION_PREFIX):
         device = section[len(BATTERY_PORT_SECTION_PREFIX):]
         addresses = reader.get_addresses(section, "pack_addresses")
+        require_direct_connection = reader.get_bool(section, "require_direct_connection", optional=True) or False
         if not device:
             reader.report(f"section [{section}] is missing the device path after '{BATTERY_PORT_SECTION_PREFIX}'")
         elif addresses:
-            ports.append(BatteryPortConfig(device=device, pack_addresses=addresses))
+            ports.append(BatteryPortConfig(device=device, pack_addresses=addresses, require_direct_connection=require_direct_connection))
     return tuple(ports)
 
 

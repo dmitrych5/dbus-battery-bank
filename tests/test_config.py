@@ -32,7 +32,7 @@ class TestExampleConfig:
 
         assert config.cells_per_pack == 16
         assert config.auto_reset_soc_on_float_transition is True
-        assert config.battery_ports == (BatteryPortConfig(device="/dev/ttyUSB0", pack_addresses=(1, 2, 3)),)
+        assert config.battery_ports == (BatteryPortConfig(device="/dev/ttyUSB0", pack_addresses=(1, 2, 3), require_direct_connection=False),)
         assert config.shunt_port == "/dev/ttySH"
         assert config.cell_voltage.float_volts == pytest.approx(3.325)
         assert config.charge_stage.cvl_charger_offset_volts == pytest.approx(0.05)

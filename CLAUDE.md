@@ -271,7 +271,11 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
 2. **Balancer-aware float switch**: model the balancer's cell-voltage cutoff in the
    absorption→float decision so charging reliably completes, and retire the VOLTAGE_DROP offset.
 3. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
-   information once all packs are polled in-process; drop if provably redundant.
+   information once all packs are polled in-process; drop if provably redundant. Likewise
+   revisit `require_direct_connection` — it was a workaround for the old per-battery driver
+   instances being unable to coordinate when some packs were unreachable; with all packs in one
+   process, direct-connection detection can likely be automatic (probe IndividualPackStatus)
+   instead of configured.
 
 Behavior changes to proven battery-handling logic beyond this list are discussed before
 implementation.
