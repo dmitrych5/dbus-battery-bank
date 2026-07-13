@@ -120,3 +120,10 @@ class TestValidation:
         text = config_text_with(removals=("[shunt]", "port ="))
         with pytest.raises(ConfigError, match=r"\[ptc_protection\] requires a \[shunt\] section"):
             write_and_load(tmp_path, text)
+
+    def test_non_positive_ptc_voltage_is_an_error(self, tmp_path):
+        text = config_text_with(
+            replacements={"expected_aux_voltage_by_temperature": "expected_aux_voltage_by_temperature = -20:0.0, 96:4.912"}
+        )
+        with pytest.raises(ConfigError, match="voltages must be positive"):
+            write_and_load(tmp_path, text)

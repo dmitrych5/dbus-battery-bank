@@ -383,3 +383,9 @@ def _validate_cross_field_rules(
         reader.report(f"[charge_stage] rebulk_soc_percent must be within (0, 100]: got {charge_stage.rebulk_soc_percent}")
     if protection.ptc is not None and shunt_port is None:
         reader.report("[ptc_protection] requires a [shunt] section, since the PTC voltage is read from the shunt Aux input")
+    if protection.ptc is not None and protection.ptc.expected_aux_voltage_by_temperature is not None:
+        table = protection.ptc.expected_aux_voltage_by_temperature
+        if any(voltage <= 0 for voltage in table.outputs):
+            # The deviation is measured relative to the expected voltage, so zero would divide
+            # by zero and negative values make the percentage meaningless.
+            reader.report(f"[ptc_protection] expected_aux_voltage_by_temperature voltages must be positive: got {table.outputs}")
