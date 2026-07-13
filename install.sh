@@ -9,6 +9,9 @@
 # serial-starter config, serial-starter probes the battery port with other drivers, which is
 # exactly the interference the pollers detect and ride out (proven for half a year on the old
 # stack). Exclusion rules can be added later as an optimization.
+#
+# The old driver's custom GUI-v2 pages must stay installed: the new services reuse them (they
+# key on the same ProductIds), so do not run the old stack's custom-gui-uninstall.sh.
 
 set -e
 

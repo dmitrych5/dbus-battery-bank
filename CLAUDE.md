@@ -170,9 +170,15 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   it as a native "Air temperature" row next to "Battery temperature" (the row is hidden unless
   the path exists), so no GUI patching is needed and all cell-sensor slots stay intact.
   `/Dc/0/Temperature` remains the cell-sensor aggregate.
-- The custom GUI-v2 QML pages are part of the deliverable (per supported Venus OS version, as in
-  the previous stack): cell voltages page, parameters page rendering the diagnostics text, and
-  the settings page hosting operator controls.
+- GUI-v2 pages, phase 1: the old driver's installed custom GUI patch is reused as-is — it
+  shows the custom battery pages for ProductId 0xBA77 (packs) and 0xBA44 (aggregate), so the
+  parameters page with the diagnostics texts and the per-pack "Reset SoC to" row (keyed on
+  `/Settings/ResetSocTo` validity) work without shipping any QML. This creates a deliberate
+  dependency: the old driver's custom GUI must stay installed until phase 2. Trip reset is
+  dbus-spy-only in phase 1 (`/Settings/ResetProtectionTrips` = 1 on the aggregate).
+- GUI-v2 pages, phase 2 (post-parity): ship this project's own QML — the Temperatures overview
+  row with the "Ambient" tile replacing the redundant average, a trip-reset control on the
+  aggregate settings page — and drop the dependency on the old driver's GUI install.
 - VRM metric workarounds are confined to one module (`vrm_metric_map` or similar) with honest
   names on the inside: corrected temperature → `/History/MinimumStarterVoltage` etc. This is a
   deliberate, contained accommodation of VRM's fixed schema.
