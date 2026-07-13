@@ -6,12 +6,12 @@ All VRM-schema accommodations are confined to vrm_metric_workarounds(): VRM has 
 PTC diagnostics, so they ride on unused standard paths with honest names on this side.
 """
 
-from statistics import mean
 from typing import Sequence
 
 from battery_bank.config import Config
 from battery_bank.core.bank import BankDecision
 from battery_bank.core.current_limits import LimitSource, PackCurrentLimit
+from battery_bank.core.stats import mean
 from battery_bank.core.values import AlarmSeverity, BatterySnapshot, PackAlarms, ShuntSnapshot
 
 ALARM_PATHS = {

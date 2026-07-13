@@ -7,11 +7,11 @@ operator can watch the condition on VRM before resetting.
 
 from dataclasses import dataclass
 from enum import Enum
-from statistics import mean
 from typing import Sequence
 
 from battery_bank.config import ProtectionConfig, PtcProtectionConfig
 from battery_bank.core.kalman import KalmanFilterState, kalman_step
+from battery_bank.core.stats import mean
 from battery_bank.core.values import BatterySnapshot
 
 KALMAN_MEASUREMENT_VARIANCE = 0.005

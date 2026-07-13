@@ -191,7 +191,7 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 
 ### Zeroing current limits is itself a hazard
 
-Publishing CCL/DCL of zero commands the inverter to stop — off-grid that blacks out the house.
+Publishing CCL/DCL of zero commands the inverter to stop — when off-grid that blacks out the house.
 Every zero-limit response must therefore be deliberate:
 
 - Staleness thresholds are sized to tolerate multiple consecutive failed polls before reacting;

@@ -19,7 +19,6 @@ when STARTUP_GRACE_SECONDS pass without a complete picture does the incompletene
 
 from dataclasses import dataclass
 from enum import Enum
-from statistics import mean
 from typing import Sequence
 
 from battery_bank.config import Config
@@ -31,6 +30,7 @@ from battery_bank.core.current_limits import (
     compute_bank_current_limit,
 )
 from battery_bank.core.protections import ProtectionState, ProtectionsResult, step_protections
+from battery_bank.core.stats import mean
 from battery_bank.core.values import AlarmSeverity, BatterySnapshot, PackAlarms, ShuntSnapshot
 
 ALARM_CATEGORIES = tuple(PackAlarms.__dataclass_fields__)
