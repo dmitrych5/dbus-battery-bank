@@ -192,10 +192,8 @@ Page {
 			}
 
 			ListButton {
-				//% "Reset protection trips"
-				text: qsTrId("dbus_battery_bank_reset_protection_trips")
-				//% "Reset"
-				secondaryText: qsTrId("dbus_battery_bank_reset")
+				text: "Reset protection trips"
+				secondaryText: "Reset"
 				preferredVisible: resetProtectionTripsItem.valid
 				onClicked: Global.dialogLayer.open(resetProtectionTripsDialogComponent)
 
@@ -203,8 +201,7 @@ Page {
 					id: resetProtectionTripsDialogComponent
 
 					ModalDialog {
-						//% "Reset protection trips"
-						title: qsTrId("dbus_battery_bank_reset_protection_trips")
+						title: "Reset protection trips"
 
 						onAccepted: resetProtectionTripsItem.setValue(1)
 
@@ -217,8 +214,7 @@ Page {
 									width: parent.width - (2 * Theme.geometry_modalDialog_content_horizontalMargin)
 									wrapMode: Text.Wrap
 									horizontalAlignment: Text.AlignHCenter
-									//% "Clear the latched protection trips and restore the charge/discharge limits? Only reset after investigating the cause."
-									text: qsTrId("dbus_battery_bank_reset_protection_trips_confirmation")
+									text: "Clear the latched protection trips and restore the charge/discharge limits? Only reset after investigating the cause."
 								}
 							}
 						}
