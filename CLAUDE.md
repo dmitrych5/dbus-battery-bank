@@ -56,7 +56,8 @@ interface so other battery types could be added later — only where that costs 
 The Cerbo is **production**; be deliberate about every change there. Its address and ssh key
 are kept out of the repository (Claude: see memory).
 
-- `scripts/deploy.sh root@<cerbo-ip>` is the whole procedure for every kind of change: it runs
+- `scripts/deploy.sh root@<cerbo-ip> ["ssh -i ~/.ssh/some-key"]` is the whole procedure for
+  every kind of change: it runs
   the tests, rsyncs the working tree to `/data/apps/dbus-battery-bank/`, ships
   `build/wasm/venus-webassembly.zip` when present, then runs `enable.sh` on the device (which
   installs QML/WASM only if content changed and restarts the GUI accordingly) and restarts the

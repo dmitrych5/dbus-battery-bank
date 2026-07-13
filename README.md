@@ -10,7 +10,7 @@ Building the custom browser GUI (WASM) is documented in [scripts/README.md](scri
 
 ```sh
 # deploy: tests, code + QML sync, WASM bundle (when built), GUI install, service restart
-scripts/deploy.sh root@<cerbo-ip>
+scripts/deploy.sh root@<cerbo-ip> ["ssh -i ~/.ssh/some-key"]
 
 svc -t /service/dbus-battery-bank    # restart
 svc -d /service/dbus-battery-bank    # stop

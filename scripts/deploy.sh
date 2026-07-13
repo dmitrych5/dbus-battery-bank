@@ -1,7 +1,7 @@
 #!/bin/bash
 # Deploys the working tree to the Cerbo and restarts the service.
 #
-#   scripts/deploy.sh root@<cerbo-ip>          # from the repository root
+#   scripts/deploy.sh root@<cerbo-ip> ["ssh -i ~/.ssh/some-key"]   # from the repository root
 #
 # One command covers every case: it ships the code and QML, ships
 # build/wasm/venus-webassembly.zip when one has been built (see scripts/README.md), then runs
@@ -15,8 +15,8 @@
 set -e
 cd "$(dirname "$0")/.."
 
-HOST=${1:?usage: scripts/deploy.sh user@cerbo-host}
-SSH_CMD="ssh -i $HOME/.ssh/id_ed25519_cerbo"
+HOST=${1:?usage: scripts/deploy.sh user@cerbo-host [ssh-command]}
+SSH_CMD=${2:-ssh}
 APP_DIR=/data/apps/dbus-battery-bank
 
 echo "Running tests..."
