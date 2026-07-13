@@ -155,8 +155,10 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 - **Flash wear is a design constraint**: the state file is saved only when its serialized content
   changed, and no persisted value may change it every control cycle. Continuously-varying values
   must be quantized (CVL: `CVL_PERSIST_QUANTUM_VOLTS`) or cadence-limited (thermal filter:
-  `THERMAL_SAVE_INTERVAL_SECONDS`) before persisting; any newly persisted value must obey the
-  same rule. Safety latches are exempt — a trip change always writes immediately.
+  `THERMAL_SAVE_INTERVAL_SECONDS`; history: `HISTORY_SAVE_INTERVAL_SECONDS`, plus an immediate
+  save on operator clear and a final save on clean shutdown) before persisting; any newly
+  persisted value must obey the same rule. Safety latches are exempt — a trip change always
+  writes immediately.
 - Charge-mode state and last-SoC-reset persist across restarts (as the old system did via
   com.victronenergy.settings).
 - DeviceInstance/CustomName via com.victronenergy.settings, Victron-style.
@@ -207,12 +209,20 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
   bank-level, so per-pack float/bulk state has no meaning; the aggregate carries the full
   diagnostics.
-- Calculated history is not yet implemented (future task): the GUI history screen currently
-  shows only the BMS-provided charge cycles and total Ah drawn. Missing: lifetime min/max
-  voltages/cell voltages/temperatures, voltage alarm counts, deepest/last/average discharge,
-  charged/discharged energy, time since last full charge, plus `/History/Clear` and
-  `/History/CanBeCleared` (their absence makes the GUI show a confusing "reset history on the
-  monitor itself" hint). Needs a small pure accumulator in the core plus persistence.
+- Calculated history: a pure accumulator (`core/history.py`) fed once per cycle from the bank
+  decision publishes the aggregate's `/History/*` — lifetime min/max voltage, cell voltage and
+  temperature, low/high voltage alarm counts (rising edges of the aggregated pack+cell alarms),
+  deepest/last/average discharge, charged/discharged energy (integrated bank power), and time
+  since last full charge — plus `/History/Clear` (writable; 1 clears everything, 2–7 clear one
+  category: capacity/voltage/time/alarms/temperature/energy) and `/History/CanBeCleared = 1`.
+  Discharge bookkeeping is cycle-based in the BMV tradition: a cycle runs full charge to full
+  charge (keyed off the decision's FloatTransition entry), where the running cycle depth is
+  finalized as "last discharge" and folded into the average. Depth records only accumulate from
+  shunt-fresh consumed Ah, because the BMS fallback counts from a different zero.
+  `/Settings/HasTemperature = 1` is published because the stock GUI hides the temperature
+  history rows without it (and `/Settings/HasStarterVoltage` deliberately stays absent, so the
+  repurposed starter-voltage VRM workaround paths never render as GUI rows). BMS-provided
+  charge cycles and total Ah drawn publish on the pack services, not the aggregate.
 - VRM metric workarounds are confined to one module (`vrm_metric_map` or similar) with honest
   names on the inside: corrected temperature → `/History/MinimumStarterVoltage` etc. This is a
   deliberate, contained accommodation of VRM's fixed schema.
@@ -379,16 +389,10 @@ Next tasks, in priority order:
    protectionTrippedItem.value === 1` (keep or drop the settings-page copy at taste),
    (c) rebuild QML + WASM and deploy. Bind the button to `/Settings/ResetProtectionTrips`
    exactly as the settings-page one.
-2. **History module** (operator uses the History screen). A small pure accumulator in the
-   core, fed per step from snapshots/decision; persisted in the state file (wall-clock
-   timestamps where needed); published on `/History/*` including `/History/Clear`
-   (writable; clears categories like the old driver) and `/History/CanBeCleared = 1` (its
-   absence causes the GUI's confusing "reset on the monitor itself" hint). Values: lifetime
-   min/max voltage and cell voltage, min/max temperature, low/high voltage alarm counts
-   (edge-triggered from the aggregated alarms), deepest/last/average discharge, charged and
-   discharged energy (integrate bank power over time), time since last full charge (stamped at
-   FloatTransition entry). BMS-provided charge cycles and total Ah drawn already publish on
-   the pack services.
+2. **Verify the history module on the device** (implemented; see "Calculated history" under
+   Publishing): after a deploy, check the aggregate's History page in the browser WASM fills
+   in over a day (energies, discharge cycle after the first full charge), that VRM behaves,
+   and that `state.json` gains the `history` block without excessive write churn.
 3. Roadmap items below (balancer-aware float switch retiring `cvl_charger_offset_volts`,
    diurnal thermal restore, master-limit/`require_direct_connection` simplifications).
 

@@ -1,6 +1,7 @@
 """Persists the control state that must survive restarts: latched protection trips (a crash
-must never clear a safety response) and the charge stage with its CVL (so a restart mid-cycle
-does not re-run absorption on a full battery or jump the voltage).
+must never clear a safety response), the charge stage with its CVL (so a restart mid-cycle
+does not re-run absorption on a full battery or jump the voltage), and the accumulated
+lifetime history (whose write cadence the main loop limits, like the thermal filter's).
 
 Monotonic timers inside ChargeStageState are meaningless across restarts, so only the stage
 and CVL are persisted; restore_control_state() rebases the timers conservatively — the
@@ -20,6 +21,7 @@ from pathlib import Path
 from battery_bank.config import Config
 from battery_bank.core.bank import ControlState
 from battery_bank.core.charge_stage import ChargeStage, ChargeStageState
+from battery_bank.core.history import HISTORY_FIELD_NAMES, HistoryValues
 from battery_bank.core.protections import ProtectionState, ThermalInertiaState, TripKind, restored_thermal_state
 
 STATE_FILE_VERSION = 1
@@ -56,14 +58,19 @@ class PersistedState:
     charge_stage: ChargeStage = ChargeStage.BULK
     cvl_volts: float | None = None
     thermal: PersistedThermalState | None = None
+    history: HistoryValues = HistoryValues()
+    """The history's continuously-growing values (energies, running cycle depth) would change
+    the file every control cycle, so the main loop cadence-limits how often a fresh snapshot
+    is handed in — the same treatment as the thermal filter."""
 
 
-def to_persisted(state: ControlState, now_wall_seconds: float) -> PersistedState:
+def to_persisted(state: ControlState, history: HistoryValues, now_wall_seconds: float) -> PersistedState:
     thermal = state.protections.thermal
     return PersistedState(
         tripped=state.protections.tripped,
         charge_stage=state.charge_stage.stage,
         cvl_volts=_quantized_cvl(state.charge_stage.cvl_volts),
+        history=history,
         thermal=(
             PersistedThermalState(
                 value_estimate=thermal.kalman.value_estimate,
@@ -130,6 +137,23 @@ def _validated_thermal(data: object) -> PersistedThermalState | None:
     return thermal
 
 
+_HISTORY_OPTIONAL_FIELDS = frozenset(
+    name for name in HISTORY_FIELD_NAMES if getattr(HistoryValues(), name) is None
+)
+"""Fields that legitimately persist as null (no extreme or event recorded yet); the counters
+and integrals always hold a number."""
+
+
+def _validated_history(data: object) -> HistoryValues:
+    if data is None:
+        # State files written before history existed.
+        return HistoryValues()
+    history = HistoryValues(**data)
+    for name in HISTORY_FIELD_NAMES:
+        _validated_number(f"history.{name}", getattr(history, name), optional=name in _HISTORY_OPTIONAL_FIELDS)
+    return history
+
+
 class StateFile:
     def __init__(self, path: Path):
         self._path = path
@@ -154,6 +178,7 @@ class StateFile:
                 charge_stage=ChargeStage[data["charge_stage"]],
                 cvl_volts=_validated_number("cvl_volts", data["cvl_volts"], optional=True),
                 thermal=_validated_thermal(data.get("thermal")),
+                history=_validated_history(data.get("history")),
             )
         except (ValueError, KeyError, TypeError) as error:
             quarantine_path = self._path.with_suffix(self._path.suffix + ".corrupt")
@@ -171,6 +196,7 @@ class StateFile:
                 "charge_stage": state.charge_stage.name,
                 "cvl_volts": state.cvl_volts,
                 "thermal": vars(state.thermal) if state.thermal is not None else None,
+                "history": {name: getattr(state.history, name) for name in HISTORY_FIELD_NAMES},
             }
         )
         if serialized == self._last_saved:

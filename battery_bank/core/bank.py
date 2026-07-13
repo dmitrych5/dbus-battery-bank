@@ -95,6 +95,9 @@ class BankDecision:
     allow_to_charge: bool
     allow_to_discharge: bool
     charge_stage: ChargeStage
+    entered_float_transition: bool
+    """True only on the step where absorption completed — the bank's full-charge moment; it
+    triggers the per-pack SoC reset and the full-charge history stamp."""
 
     voltage_volts: float | None
     current_amps: float | None
@@ -159,6 +162,7 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
             events.append(Event(EventSeverity.INFO, "PTC aux voltage reporting again"))
 
     request_soc_reset_pack_ids: tuple[str, ...] = ()
+    entered_float_transition = False
     if all_packs_fresh:
         stage_result = step_charge_stage(
             config.cell_voltage, config.charge_stage, config.cvl_controller, config.cells_per_pack, fresh_packs, state.charge_stage, now_monotonic
@@ -168,7 +172,8 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         stage = stage_result.stage
         if stage is not state.charge_stage.stage:
             events.append(Event(EventSeverity.INFO, f"Charge stage: {state.charge_stage.stage.value} -> {stage.value}"))
-        if stage_result.entered_float_transition and config.auto_reset_soc_on_float_transition:
+        entered_float_transition = stage_result.entered_float_transition
+        if entered_float_transition and config.auto_reset_soc_on_float_transition:
             request_soc_reset_pack_ids = tuple(pack.identity.unique_id for pack in fresh_packs)
 
         charge_limit = compute_bank_current_limit(
@@ -206,6 +211,7 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         allow_to_charge=ccl_amps > 0.0,
         allow_to_discharge=dcl_amps > 0.0,
         charge_stage=stage,
+        entered_float_transition=entered_float_transition,
         **_measurements(inputs, fresh_packs, shunt_fresh),
         alarms=_raise_protection_alarms(_aggregate_alarms(inputs.packs), protections),
         cable_alarm=AlarmSeverity.OK if in_startup_grace else _cable_alarm(all_packs_fresh, shunt_configured, shunt_fresh),
