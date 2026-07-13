@@ -170,16 +170,32 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   it as a native "Air temperature" row next to "Battery temperature" (the row is hidden unless
   the path exists), so no GUI patching is needed and all cell-sensor slots stay intact.
   `/Dc/0/Temperature` remains the cell-sensor aggregate.
-- GUI-v2 pages: the project ships its own copies of the five battery QML pages (per-version
-  sets under `qml/gui-v2/`), installed over the stock ones via the overlay-fs app by
-  `custom-gui-install.sh`, which `enable.sh` runs on every boot — so firmware upgrades heal
-  themselves. Changes vs the old driver's pages: the settings entry also shows for the
+- There are three GUI surfaces, and knowing which is which matters (a repeated confusion):
+  GUI-v1 (old Qt app — what this installation's Remote Console runs), the GUI-v2 Qt app (GX
+  Touch displays / Remote Console when switched to GUI-v2 — fed by QML files under
+  `/opt/victronenergy/gui-v2`), and the GUI-v2 browser WASM at `http://<gx>/gui-v2/` — a
+  compiled bundle that QML files cannot patch. **The operator's primary UI is the browser
+  WASM.**
+- GUI-v2 QML pages: the project ships its own copies of the five battery QML pages
+  (per-Venus-version sets under `qml/gui-v2/`; the 3.6x set serves firmware ≤ v3.69, 3.7x
+  serves ≤ v3.79), installed over the stock ones via the overlay-fs app by
+  `custom-gui-install.sh`, which `enable.sh` runs on every boot so Cerbo firmware upgrades
+  heal themselves. Changes vs the old driver's pages: the settings entry also shows for the
   aggregate (ProductId 0xBA44) and hosts a confirmed "Reset protection trips" control bound to
-  `/Settings/ResetProtectionTrips` (visible only where the path exists). Use plain strings for
-  labels we add — our translation ids are not in Victron's compiled catalog. The browser WASM
-  build of GUI-v2 is deliberately untouched (it cannot be patched without a full Qt rebuild);
-  the QML applies to the local display and Remote Console. The Ambient tile substitution in
-  the Temperatures row was dropped: the native "Air temperature" row proved sufficient.
+  `/Settings/ResetProtectionTrips`. Use plain strings for labels we add — our translation ids
+  are not in Victron's compiled catalog. These pages are currently invisible on this
+  installation (Remote Console runs GUI-v1); trip reset is done via ssh:
+  `dbus -y com.victronenergy.battery.aggregate /Settings/ResetProtectionTrips SetValue 1`.
+- Browser WASM status: the old driver installed mr-manuel's custom WASM build into
+  `/var/www/venus/gui-v2` (that is why the browser shows the battery pages, including for the
+  aggregate). It keeps working with this project's services (same ProductIds and paths) and
+  survives firmware upgrades via the overlay — but it is now frozen, since the old driver's
+  update mechanism no longer runs. Future task: build this project's own WASM (mr-manuel's
+  venus-os_dbus-serialbattery_gui-v2 build pipeline, with our two changed pages) so the
+  trip-reset control reaches the browser and the WASM tracks firmware versions again; until
+  then, check that the WASM still works after each firmware upgrade.
+- The Ambient tile substitution in the Temperatures row was dropped: the native "Air
+  temperature" row proved sufficient.
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
   bank-level, so per-pack float/bulk state has no meaning; the aggregate carries the full
   diagnostics.
