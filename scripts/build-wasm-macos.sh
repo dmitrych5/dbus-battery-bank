@@ -48,6 +48,17 @@ export PATH="$TOOLCHAIN_DIR/Qt/Tools/CMake/CMake.app/Contents/bin:$TOOLCHAIN_DIR
 # with its .github/patches/qt-fixes.sh); restore it.
 chmod +x "$TOOLCHAIN_DIR/Qt/$QT_VERSION"/*/bin/* "$TOOLCHAIN_DIR/Qt/$QT_VERSION"/*/libexec/* 2>/dev/null || true
 
+# The 6.6.x WebAssembly packages are built on a Windows host, and aqt's macOS install leaves
+# Windows-style backslash paths inside the POSIX shell wrappers; normalize them. The host Qt
+# location is pinned explicitly for the same reason (qt.toolchain.cmake honors QT_HOST_PATH).
+for wrapper in "$QT_WASM_DIR"/bin/qt-* "$QT_WASM_DIR"/libexec/qt-*; do
+    case "$wrapper" in
+        *.bat) continue ;;
+    esac
+    [ -f "$wrapper" ] && sed -i '' 's|\\|/|g' "$wrapper"
+done
+export QT_HOST_PATH="$TOOLCHAIN_DIR/Qt/$QT_VERSION/macos"
+
 echo "*** Emscripten $EMSCRIPTEN ***"
 if [ ! -d "$TOOLCHAIN_DIR/emsdk" ]; then
     git clone -q https://github.com/emscripten-core/emsdk.git "$TOOLCHAIN_DIR/emsdk"
