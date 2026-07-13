@@ -11,9 +11,13 @@ OS ships Python without the `statistics` module, and a udev `VE_SERVICE=ignore` 
 battery port is required (created on the device as
 `/data/etc/udev/rules.d/11-ignore-battery-bank-battery-port.rules`, symlinked from
 `/data/rc.local`) — serial-starter's probing of the freed port makes reads fail outright.
-Note for future firmware upgrades: the old stack's rc.local line used to reinstall the custom
-GUI on boot and is now disabled, so after a firmware upgrade the GUI pages need
-`custom-gui-install.sh` rerun manually (until phase-2 QML ships with this project).
+Since resolved: the project now ships its own GUI-v2 pages, installed by its own
+`custom-gui-install.sh` from `enable.sh` on every boot, so firmware upgrades heal themselves
+and nothing depends on the old driver's GUI install anymore. Further verified by the operator:
+a service restart (~30 s gap) does not trigger the system's monitor-lost alarm (that takes
+3-4 minutes of absence), the invalid-config error state shows "#119 Settings invalid" plus the
+internal-failure alarm on the Cerbo, and VRM metrics continue normally. The operator declared
+the switch permanent; no rollback rehearsal.
 
 ## Prepare (old stack still running)
 

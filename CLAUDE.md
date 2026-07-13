@@ -170,17 +170,16 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   it as a native "Air temperature" row next to "Battery temperature" (the row is hidden unless
   the path exists), so no GUI patching is needed and all cell-sensor slots stay intact.
   `/Dc/0/Temperature` remains the cell-sensor aggregate.
-- GUI-v2 pages, phase 1: the old driver's installed custom GUI patch is reused as-is — it
-  shows the custom battery pages for ProductId 0xBA77 (packs) and 0xBA44 (aggregate), so the
-  parameters page with the diagnostics texts and the per-pack "Reset SoC to" row (keyed on
-  `/Settings/ResetSocTo` validity) work without shipping any QML. This creates a deliberate
-  dependency: the old driver's custom GUI must stay installed until phase 2. Trip reset is
-  dbus-spy-only in phase 1 (`/Settings/ResetProtectionTrips` = 1 on the aggregate).
-- GUI-v2 pages, phase 2 (post-parity): ship this project's own QML — a trip-reset control on
-  the aggregate settings page — and drop the dependency on the old driver's GUI install (which
-  also stops firmware upgrades from removing the pages). The Ambient tile substitution in the
-  Temperatures row was dropped: the native "Air temperature" row on the battery page proved
-  sufficient in commissioning.
+- GUI-v2 pages: the project ships its own copies of the five battery QML pages (per-version
+  sets under `qml/gui-v2/`), installed over the stock ones via the overlay-fs app by
+  `custom-gui-install.sh`, which `enable.sh` runs on every boot — so firmware upgrades heal
+  themselves. Changes vs the old driver's pages: the settings entry also shows for the
+  aggregate (ProductId 0xBA44) and hosts a confirmed "Reset protection trips" control bound to
+  `/Settings/ResetProtectionTrips` (visible only where the path exists). Use plain strings for
+  labels we add — our translation ids are not in Victron's compiled catalog. The browser WASM
+  build of GUI-v2 is deliberately untouched (it cannot be patched without a full Qt rebuild);
+  the QML applies to the local display and Remote Console. The Ambient tile substitution in
+  the Temperatures row was dropped: the native "Air temperature" row proved sufficient.
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
   bank-level, so per-pack float/bulk state has no meaning; the aggregate carries the full
   diagnostics.
