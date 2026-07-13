@@ -44,6 +44,10 @@ if [ ! -d "$TOOLCHAIN_DIR/Qt/Tools/Ninja" ]; then
 fi
 export PATH="$TOOLCHAIN_DIR/Qt/Tools/CMake/CMake.app/Contents/bin:$TOOLCHAIN_DIR/Qt/Tools/Ninja:$PATH"
 
+# aqt installs some Qt entry-point scripts without the executable bit (upstream fixes this
+# with its .github/patches/qt-fixes.sh); restore it.
+chmod +x "$TOOLCHAIN_DIR/Qt/$QT_VERSION"/*/bin/* "$TOOLCHAIN_DIR/Qt/$QT_VERSION"/*/libexec/* 2>/dev/null || true
+
 echo "*** Emscripten $EMSCRIPTEN ***"
 if [ ! -d "$TOOLCHAIN_DIR/emsdk" ]; then
     git clone -q https://github.com/emscripten-core/emsdk.git "$TOOLCHAIN_DIR/emsdk"
