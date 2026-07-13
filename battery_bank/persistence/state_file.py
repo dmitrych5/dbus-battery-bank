@@ -19,7 +19,7 @@ from pathlib import Path
 from battery_bank.config import Config
 from battery_bank.core.bank import ControlState
 from battery_bank.core.charge_stage import ChargeStage, ChargeStageState
-from battery_bank.core.protections import ProtectionState, TripKind
+from battery_bank.core.protections import ProtectionState, ThermalInertiaState, TripKind, restored_thermal_state
 
 STATE_FILE_VERSION = 1
 
@@ -30,21 +30,46 @@ class StateFileError(Exception):
 
 
 @dataclass(frozen=True)
+class PersistedThermalState:
+    """A snapshot of the PTC thermal-inertia filter. Even a few-hours-old snapshot restores
+    the slowly-learned rate estimate, which would otherwise take the filter tens of minutes to
+    re-learn after every restart — leaving the overheat protection under-corrected meanwhile."""
+
+    value_estimate: float
+    rate_estimate: float
+    updates_count: int
+    saved_at_wall_seconds: float
+    """Wall clock, not monotonic: the downtime across a restart must be measurable."""
+
+
+@dataclass(frozen=True)
 class PersistedState:
     tripped: frozenset[TripKind] = frozenset()
     charge_stage: ChargeStage = ChargeStage.BULK
     cvl_volts: float | None = None
+    thermal: PersistedThermalState | None = None
 
 
-def to_persisted(state: ControlState) -> PersistedState:
+def to_persisted(state: ControlState, now_wall_seconds: float) -> PersistedState:
+    thermal = state.protections.thermal
     return PersistedState(
         tripped=state.protections.tripped,
         charge_stage=state.charge_stage.stage,
         cvl_volts=state.charge_stage.cvl_volts,
+        thermal=(
+            PersistedThermalState(
+                value_estimate=thermal.kalman.value_estimate,
+                rate_estimate=thermal.kalman.rate_estimate,
+                updates_count=thermal.updates_count,
+                saved_at_wall_seconds=now_wall_seconds,
+            )
+            if thermal.updates_count > 0
+            else None
+        ),
     )
 
 
-def restore_control_state(persisted: PersistedState, config: Config, now_monotonic: float) -> ControlState:
+def restore_control_state(persisted: PersistedState, config: Config, now_monotonic: float, now_wall_seconds: float) -> ControlState:
     stage = persisted.charge_stage
     cvl = persisted.cvl_volts
     max_voltage = config.cells_per_pack * config.cell_voltage.max_volts
@@ -57,7 +82,18 @@ def restore_control_state(persisted: PersistedState, config: Config, now_monoton
         float_transition_start_cvl_volts=cvl if stage is ChargeStage.FLOAT_TRANSITION else None,
         last_step_at=None,
     )
-    return ControlState(charge_stage=charge_stage, protections=ProtectionState(tripped=persisted.tripped))
+    thermal = (
+        restored_thermal_state(
+            value_estimate=persisted.thermal.value_estimate,
+            rate_estimate=persisted.thermal.rate_estimate,
+            updates_count=persisted.thermal.updates_count,
+            age_seconds=now_wall_seconds - persisted.thermal.saved_at_wall_seconds,
+            now_monotonic=now_monotonic,
+        )
+        if persisted.thermal is not None
+        else ThermalInertiaState()
+    )
+    return ControlState(charge_stage=charge_stage, protections=ProtectionState(tripped=persisted.tripped, thermal=thermal))
 
 
 class StateFile:
@@ -83,6 +119,7 @@ class StateFile:
                 tripped=frozenset(TripKind[name] for name in data["tripped"]),
                 charge_stage=ChargeStage[data["charge_stage"]],
                 cvl_volts=data["cvl_volts"],
+                thermal=PersistedThermalState(**data["thermal"]) if data.get("thermal") is not None else None,
             )
         except (ValueError, KeyError, TypeError) as error:
             quarantine_path = self._path.with_suffix(self._path.suffix + ".corrupt")
@@ -98,6 +135,7 @@ class StateFile:
                 "tripped": sorted(kind.name for kind in state.tripped),
                 "charge_stage": state.charge_stage.name,
                 "cvl_volts": state.cvl_volts,
+                "thermal": vars(state.thermal) if state.thermal is not None else None,
             }
         )
         if serialized == self._last_saved:

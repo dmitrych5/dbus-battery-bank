@@ -55,9 +55,48 @@ class ProtectionsResult:
     ptc: PtcDiagnostics | None
 
 
+THERMAL_RESTORE_MAX_AGE_SECONDS = 24 * 3600.0
+"""Beyond this downtime a persisted thermal state says nothing useful; start cold."""
+RESTORED_VALUE_VARIANCE = 1.0
+RESTORED_RATE_VARIANCE = 1e-8
+"""Covariance priors after a restart (about ±1 C on the value, ±1e-4 C/s on the rate):
+uncertain enough to re-converge within minutes of samples, certain enough that the persisted
+rate keeps the inertia correction meaningful immediately."""
+
+
 def reset_trips(state: ProtectionState) -> ProtectionState:
     """Operator-initiated reset; the only way a latched trip clears."""
     return ProtectionState(tripped=frozenset(), thermal=state.thermal)
+
+
+def restored_thermal_state(
+    value_estimate: float,
+    rate_estimate: float,
+    updates_count: int,
+    age_seconds: float,
+    now_monotonic: float,
+) -> ThermalInertiaState:
+    """Reconstructs the thermal filter from a persisted snapshot taken age_seconds ago.
+
+    The filter's own predict step is the restore operator for the value (value plus rate times
+    the gap). The covariance is deliberately reset to the restore priors instead of being
+    Q-propagated across the gap: the tiny process variance tuned for continuous smoothing
+    would claim near-certainty about a rate that may well have changed while the service was
+    down, making the filter unlearn a wrong rate far too slowly. The warmup counter is
+    preserved so the inertia correction is active immediately after the restart."""
+    age_seconds = max(0.0, age_seconds)
+    if age_seconds > THERMAL_RESTORE_MAX_AGE_SECONDS:
+        return ThermalInertiaState()
+    kalman = KalmanFilterState(
+        value_estimate=value_estimate + rate_estimate * age_seconds,
+        rate_estimate=rate_estimate,
+        last_time=now_monotonic,
+        p00=RESTORED_VALUE_VARIANCE,
+        p01=0.0,
+        p10=0.0,
+        p11=RESTORED_RATE_VARIANCE,
+    )
+    return ThermalInertiaState(kalman=kalman, updates_count=updates_count, last_sample_at=None)
 
 
 def step_protections(
