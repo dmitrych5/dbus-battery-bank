@@ -195,6 +195,20 @@ Every zero-limit response must therefore be deliberate:
   when a startup grace period expires without completeness does it fail loud. A restarting
   service must never momentarily command the inverter to stop.
 
+### Operator-visible alarm channels
+
+A log line alone never reaches the operator; every condition that matters maps to a battery
+alarm path, because those are the channel VRM verifiably notifies on:
+
+- Stale/missing pack data → `/Alarms/BmsCable` (ALARM); stale shunt → the same path as WARNING.
+- Latched protection trips (all thermal today) → `/Alarms/HighTemperature`, raised for as long
+  as the trip is latched.
+- Faults of the service itself — corrupt state file, repeated cycle failures, invalid
+  configuration → `/Alarms/InternalFailure` (in addition to the Victron error state for
+  invalid config, whose own notification behavior is still to be verified on the device).
+- BMS-reported alarms pass through their natural categories via worst-per-category
+  aggregation.
+
 ### Error taxonomy
 
 Every failure is handled as exactly one of:
