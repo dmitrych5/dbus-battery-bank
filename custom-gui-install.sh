@@ -53,3 +53,37 @@ if [ "$files_changed" -gt 0 ] && [ -e /service/start-gui ]; then
     svc -t /service/start-gui
 fi
 echo "GUI-v2 pages up to date ($files_changed file(s) changed)."
+
+
+# --- Browser WASM (the GUI-v2 web app at http://<gx>/gui-v2/) ---
+# Built by scripts/build-wasm-docker.sh from the Venus-version-matched branch with this
+# project's pages; shipped to the device as wasm/venus-webassembly.zip.
+WASM_ZIP="$APP_DIR/wasm/venus-webassembly.zip"
+WWW_GUI_DIR=/var/www/venus/gui-v2
+WASM_MARKER="$WWW_GUI_DIR/.dbus-battery-bank-wasm.sha256"
+
+if [ -f "$WASM_ZIP" ] && [ -d /var/www/venus ]; then
+    zip_hash=$(sha256sum "$WASM_ZIP" | cut -d" " -f1)
+    if [ "$(cat "$WASM_MARKER" 2>/dev/null)" == "$zip_hash" ]; then
+        echo "Browser WASM already up to date."
+    else
+        if ! bash /data/apps/overlay-fs/add-app-and-directory.sh "$OVERLAY_APP_NAME" /var/www/venus; then
+            echo "ERROR: Could not overlay /var/www/venus" >&2
+            exit 1
+        fi
+        echo "Installing the browser WASM..."
+        rm -rf /tmp/wasm
+        unzip -oq "$WASM_ZIP" -d /tmp
+        rm -rf "$WWW_GUI_DIR"
+        mv /tmp/wasm "$WWW_GUI_DIR"
+        cd "$WWW_GUI_DIR"
+        # The gzip copy and hash file are expected by the VRM portal check.
+        [ -f venus-gui-v2.wasm.gz ] || gzip -k venus-gui-v2.wasm
+        sha256sum venus-gui-v2.wasm > venus-gui-v2.wasm.sha256
+        echo "$zip_hash" > "$WASM_MARKER"
+        if [ -e /service/vrmlogger ]; then
+            svc -t /service/vrmlogger
+        fi
+        echo "|- Browser WASM installed."
+    fi
+fi
