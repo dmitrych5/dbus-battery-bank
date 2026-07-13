@@ -235,13 +235,17 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 - Calculated history: a pure accumulator (`core/history.py`) fed once per cycle from the bank
   decision publishes the aggregate's `/History/*` — lifetime min/max voltage, cell voltage and
   temperature, low/high voltage alarm counts (rising edges of the aggregated pack+cell alarms),
-  deepest/last/average discharge, charged/discharged energy (integrated bank power), and time
-  since last full charge — plus `/History/Clear` (writable; 1 clears everything, 2–7 clear one
-  category: capacity/voltage/time/alarms/temperature/energy) and `/History/CanBeCleared = 1`.
-  Discharge bookkeeping is cycle-based in the BMV tradition: a cycle runs full charge to full
-  charge (keyed off the decision's FloatTransition entry), where the running cycle depth is
-  finalized as "last discharge" and folded into the average. Depth records only accumulate from
-  shunt-fresh consumed Ah, because the BMS fallback counts from a different zero.
+  deepest/last/average discharge, charged/discharged energy, and time since last full charge —
+  plus `/History/Clear` (writable; any non-zero value clears everything) and
+  `/History/CanBeCleared = 1`. Charged/discharged energy comes from the shunt's own lifetime
+  counters (VE.Direct H17/H18, carried from the alternating history frame into every
+  `ShuntSnapshot`): the shunt integrates internally and keeps counting while the service is
+  down; a clear rebases them against a persisted baseline, and totals dropping below the
+  baseline (shunt replaced/reset) restart the baseline at zero. Discharge bookkeeping is
+  cycle-based in the BMV tradition: a cycle runs full charge to full charge (keyed off the
+  decision's FloatTransition entry), where the running cycle depth is finalized as "last
+  discharge" and folded into the average. Depth and energy records only accumulate from
+  shunt-fresh data, because the BMS fallback counts from a different zero.
   `/Settings/HasTemperature = 1` is published because the stock GUI hides the temperature
   history rows without it (and `/Settings/HasStarterVoltage` deliberately stays absent, so the
   repurposed starter-voltage VRM workaround paths never render as GUI rows). BMS-provided

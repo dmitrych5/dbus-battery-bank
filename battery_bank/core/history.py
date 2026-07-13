@@ -1,5 +1,5 @@
 """Lifetime battery history: a pure accumulator fed once per control step from the bank
-decision and pack snapshots. It only records — nothing in it feeds back into control.
+decision and the snapshots. It only records — nothing in it feeds back into control.
 
 Discharge bookkeeping is cycle-based, in the BMV tradition: one cycle runs from full charge to
 full charge (the decision's FloatTransition entry). The running depth of the current cycle is
@@ -7,6 +7,10 @@ the largest consumed-Ah magnitude seen since the last full charge; at the full-c
 is finalized as the "last discharge" and folded into the average, and the lifetime deepest
 record tracks it continuously. Depths are stored as positive magnitudes; the publishing layer
 negates them per the Victron convention.
+
+Charged/discharged energy comes from the shunt's own lifetime counters (it integrates
+internally at high rate and keeps counting while this service is down), published relative to
+a baseline that an operator clear moves up to the current totals.
 
 Alarm counters count rising edges of the aggregated alarms; an edge tracker of None means "not
 observed yet" (fresh start or restart), so an alarm already active at startup is adopted
@@ -17,12 +21,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Sequence
 
 from battery_bank.core.bank import BankDecision
-from battery_bank.core.values import AlarmSeverity, BatterySnapshot
-
-ENERGY_INTEGRATION_MAX_GAP_SECONDS = 30.0
-"""Steps further apart than this (stalled cycles, restarts) contribute no energy: the power in
-between is unknown, and guessing across a long gap would corrupt the counters more than the
-skipped interval loses. Sized to the staleness budget, within which data still counts as live."""
+from battery_bank.core.values import AlarmSeverity, BatterySnapshot, ShuntSnapshot
 
 
 @dataclass(frozen=True)
@@ -44,8 +43,11 @@ class HistoryValues:
     """Largest consumed-Ah magnitude since the last full charge — the running cycle depth."""
     discharge_cycle_count: int = 0
     discharge_cycle_ah_total: float = 0.0
-    charged_energy_kwh: float = 0.0
-    discharged_energy_kwh: float = 0.0
+    charged_energy_kwh: float | None = None
+    discharged_energy_kwh: float | None = None
+    """Shunt lifetime total minus the clear baseline; None until totals have been seen."""
+    charged_energy_baseline_kwh: float = 0.0
+    discharged_energy_baseline_kwh: float = 0.0
     last_full_charge_at_wall_seconds: float | None = None
     """Wall clock, not monotonic: the value must stay meaningful across restarts."""
 
@@ -63,40 +65,27 @@ class HistoryState:
     values: HistoryValues = HistoryValues()
     low_voltage_alarm_active: bool | None = None
     high_voltage_alarm_active: bool | None = None
-    last_step_at_monotonic: float | None = None
 
 
-_CLEAR_CATEGORY_FIELDS: dict[int, tuple[str, ...]] = {
-    2: ("deepest_discharge_ah", "last_discharge_ah", "cycle_discharge_ah", "discharge_cycle_count", "discharge_cycle_ah_total"),
-    3: ("minimum_voltage_volts", "maximum_voltage_volts", "minimum_cell_voltage_volts", "maximum_cell_voltage_volts"),
-    4: ("last_full_charge_at_wall_seconds",),
-    5: ("low_voltage_alarm_count", "high_voltage_alarm_count"),
-    6: ("minimum_temperature_celsius", "maximum_temperature_celsius"),
-    7: ("charged_energy_kwh", "discharged_energy_kwh"),
-}
-CLEAR_EVERYTHING = 1
-"""/History/Clear values follow the old driver: 1 clears everything, 2 capacity, 3 voltage,
-4 time, 5 alarms, 6 temperature, 7 energy. The GUI's Clear button writes 1; the categories
-remain reachable via dbus for selective resets."""
-
-
-def clear_history(state: HistoryState, category: int) -> HistoryState:
-    """Resets one category (or everything) to defaults; unknown categories clear nothing.
-    Cleared values re-accumulate from the very next step."""
-    if category == CLEAR_EVERYTHING:
-        return replace(state, values=HistoryValues())
-    field_names = _CLEAR_CATEGORY_FIELDS.get(category)
-    if field_names is None:
-        return state
-    defaults = HistoryValues()
-    return replace(state, values=replace(state.values, **{name: getattr(defaults, name) for name in field_names}))
+def clear_history(state: HistoryState) -> HistoryState:
+    """Resets everything (the GUI's Clear button writes 1); cleared values re-accumulate from
+    the very next step. The shunt's lifetime energy counters cannot be reset from here, so
+    clearing moves their baselines up to the current totals instead."""
+    values = state.values
+    return replace(
+        state,
+        values=HistoryValues(
+            charged_energy_baseline_kwh=values.charged_energy_baseline_kwh + (values.charged_energy_kwh or 0.0),
+            discharged_energy_baseline_kwh=values.discharged_energy_baseline_kwh + (values.discharged_energy_kwh or 0.0),
+        ),
+    )
 
 
 def step_history(
     state: HistoryState,
     decision: BankDecision,
     packs: Sequence[BatterySnapshot],
-    now_monotonic: float,
+    shunt: ShuntSnapshot | None,
     now_wall_seconds: float,
 ) -> HistoryState:
     values = _track_extremes(state.values, decision, packs)
@@ -107,14 +96,14 @@ def step_history(
         values, "high_voltage_alarm_count", state.high_voltage_alarm_active, decision.alarms.high_voltage, decision.alarms.high_cell_voltage
     )
     values = _track_discharge_depth(values, decision)
-    values = _integrate_energy(values, decision, state.last_step_at_monotonic, now_monotonic)
+    if shunt is not None and decision.shunt_fresh:
+        values = _track_energy(values, shunt)
     if decision.entered_float_transition:
         values = _complete_charge_cycle(values, now_wall_seconds)
     return HistoryState(
         values=values,
         low_voltage_alarm_active=low_active,
         high_voltage_alarm_active=high_active,
-        last_step_at_monotonic=now_monotonic,
     )
 
 
@@ -158,16 +147,19 @@ def _track_discharge_depth(values: HistoryValues, decision: BankDecision) -> His
     )
 
 
-def _integrate_energy(values: HistoryValues, decision: BankDecision, last_step_at: float | None, now_monotonic: float) -> HistoryValues:
-    if decision.power_watts is None or last_step_at is None:
-        return values
-    elapsed = now_monotonic - last_step_at
-    if not 0.0 < elapsed <= ENERGY_INTEGRATION_MAX_GAP_SECONDS:
-        return values
-    energy_kwh = decision.power_watts * elapsed / 3_600_000
-    if energy_kwh >= 0:
-        return replace(values, charged_energy_kwh=values.charged_energy_kwh + energy_kwh)
-    return replace(values, discharged_energy_kwh=values.discharged_energy_kwh - energy_kwh)
+def _track_energy(values: HistoryValues, shunt: ShuntSnapshot) -> HistoryValues:
+    updates: dict[str, float] = {}
+    for direction, total in (("charged", shunt.charged_energy_total_kwh), ("discharged", shunt.discharged_energy_total_kwh)):
+        if total is None:
+            continue
+        baseline = getattr(values, f"{direction}_energy_baseline_kwh")
+        if total < baseline:
+            # The shunt's counters restarted (device replaced or reset): treat it as a new
+            # meter rather than publishing a negative energy.
+            baseline = 0.0
+            updates[f"{direction}_energy_baseline_kwh"] = baseline
+        updates[f"{direction}_energy_kwh"] = total - baseline
+    return replace(values, **updates) if updates else values
 
 
 def _complete_charge_cycle(values: HistoryValues, now_wall_seconds: float) -> HistoryValues:

@@ -9,7 +9,7 @@ from battery_bank.acquisition.shunt_poller import ShuntPoller
 from battery_bank.config import BatteryPortConfig
 from battery_bank.transport import up16s
 from tests.test_up16s import response_frame
-from tests.test_vedirect import SHUNT_FIELDS, frame_bytes
+from tests.test_vedirect import HISTORY_FIELDS, SHUNT_FIELDS, frame_bytes
 
 PORT = "/dev/ttyUSB0"
 
@@ -223,6 +223,19 @@ class TestShuntPoller:
         poller = ShuntPoller(link, clock=lambda: 1000.0)
         first = poller.poll()
         assert poller.poll() is first
+
+    def test_energy_totals_carry_from_the_history_frame_into_snapshots(self):
+        alternating = frame_bytes(SHUNT_FIELDS) + frame_bytes(HISTORY_FIELDS) + frame_bytes(SHUNT_FIELDS) * 2
+        link = self.FakeShuntLink([alternating])
+        snapshot = ShuntPoller(link, clock=lambda: 1000.0).poll()
+        assert snapshot.charged_energy_total_kwh == pytest.approx(1500.0)
+        assert snapshot.discharged_energy_total_kwh == pytest.approx(1400.0)
+
+    def test_totals_unknown_until_the_history_frame_arrives(self):
+        link = self.FakeShuntLink([frame_bytes(SHUNT_FIELDS) * 3])
+        snapshot = ShuntPoller(link, clock=lambda: 1000.0).poll()
+        assert snapshot.charged_energy_total_kwh is None
+        assert snapshot.discharged_energy_total_kwh is None
 
     def test_interference_triggers_reopen(self):
         link = self.FakeShuntLink([])

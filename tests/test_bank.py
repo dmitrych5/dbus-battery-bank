@@ -23,13 +23,23 @@ def make_packs(taken_at=1000.0, **overrides):
     return tuple(make_snapshot(unique_id=f"pack-{address}", address=address, taken_at_monotonic=taken_at, **overrides) for address in (1, 2, 3))
 
 
-def make_shunt(taken_at=1000.0, current_amps=-5.0, soc_percent=82.5, consumed_ah=-17.5, aux_voltage_volts=0.777):
+def make_shunt(
+    taken_at=1000.0,
+    current_amps=-5.0,
+    soc_percent=82.5,
+    consumed_ah=-17.5,
+    aux_voltage_volts=0.777,
+    charged_energy_total_kwh=1500.0,
+    discharged_energy_total_kwh=1400.0,
+):
     return ShuntSnapshot(
         taken_at_monotonic=taken_at,
         current_amps=current_amps,
         soc_percent=soc_percent,
         consumed_ah=consumed_ah,
         aux_voltage_volts=aux_voltage_volts,
+        charged_energy_total_kwh=charged_energy_total_kwh,
+        discharged_energy_total_kwh=discharged_energy_total_kwh,
     )
 
 

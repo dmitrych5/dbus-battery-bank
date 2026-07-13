@@ -20,6 +20,10 @@ FIELD_SOC_PERMILLE = "SOC"
 FIELD_CONSUMED_MILLIAMP_HOURS = "CE"
 FIELD_AUX_VOLTAGE_MILLIVOLTS = "VS"
 """The shunt reports its Aux input here when the input is configured as starter battery."""
+FIELD_DISCHARGED_ENERGY_10WH = "H17"
+FIELD_CHARGED_ENERGY_10WH = "H18"
+"""Lifetime energy counters, sent in the device's alternating history frame — a separate frame
+from the measurements, which is why they parse into their own value."""
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,12 @@ class ShuntReading:
     consumed_ah: float
     """Negative when energy was consumed, following the device convention."""
     aux_voltage_volts: float | None
+
+
+@dataclass(frozen=True)
+class EnergyTotals:
+    charged_kwh: float
+    discharged_kwh: float
 
 
 class VeDirectParser:
@@ -90,6 +100,18 @@ def parse_shunt_reading(frame: VeDirectFrame) -> ShuntReading | None:
         consumed_ah=consumed_ah,
         aux_voltage_volts=_scaled_int_field(frame, FIELD_AUX_VOLTAGE_MILLIVOLTS, 1000.0),
     )
+
+
+def parse_energy_totals(frame: VeDirectFrame) -> EnergyTotals | None:
+    """Extracts the lifetime energy counters from a history frame; None when the frame is
+    invalid or is not the history frame."""
+    if not frame.checksum_valid:
+        return None
+    charged_kwh = _scaled_int_field(frame, FIELD_CHARGED_ENERGY_10WH, 100.0)
+    discharged_kwh = _scaled_int_field(frame, FIELD_DISCHARGED_ENERGY_10WH, 100.0)
+    if charged_kwh is None or discharged_kwh is None:
+        return None
+    return EnergyTotals(charged_kwh=charged_kwh, discharged_kwh=discharged_kwh)
 
 
 def _scaled_int_field(frame: VeDirectFrame, field: str, divisor: float) -> float | None:

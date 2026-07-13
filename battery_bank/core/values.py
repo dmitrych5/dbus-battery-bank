@@ -110,3 +110,7 @@ class ShuntSnapshot:
     consumed_ah: float
     aux_voltage_volts: float | None
     """PTC thermistor chain voltage on the shunt's Aux input; None if the shunt does not report it."""
+    charged_energy_total_kwh: float | None
+    discharged_energy_total_kwh: float | None
+    """The shunt's own lifetime energy counters — it integrates internally and keeps counting
+    while this service is down. None until its history frame has been seen after a connect."""

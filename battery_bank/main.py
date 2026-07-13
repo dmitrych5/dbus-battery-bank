@@ -140,9 +140,8 @@ class BatteryBankService:
         shunt = self._shunt_poller.poll() if self._shunt_poller is not None else None
 
         inputs = BankInputs(packs=tuple(self._snapshots.values()), shunt=shunt)
-        now_monotonic = time.monotonic()
-        self._state, decision, events = step_bank(self._config, self._state, inputs, now_monotonic)
-        self._history = step_history(self._history, decision, inputs.packs, now_monotonic, time.time())
+        self._state, decision, events = step_bank(self._config, self._state, inputs, time.monotonic())
+        self._history = step_history(self._history, decision, inputs.packs, inputs.shunt, time.time())
         for event in events:
             logger.log(EVENT_LOG_LEVELS[event.severity], event.message)
         for unique_id in decision.request_soc_reset_pack_ids:
@@ -224,8 +223,8 @@ class BatteryBankService:
     def _clear_history_callback(self, path: str, value) -> bool:
         if not value:
             return False
-        logger.warning("Operator cleared history (category %s)", value)
-        self._history = clear_history(self._history, int(value))
+        logger.warning("Operator cleared history")
+        self._history = clear_history(self._history)
         # Saved immediately: an operator action must not be resurrected by a crash.
         self._persist(fresh_history_due=True)
         return True
