@@ -107,6 +107,7 @@ class BankDecision:
     alarms: PackAlarms
     cable_alarm: AlarmSeverity
     all_packs_fresh: bool
+    fresh_pack_count: int
     shunt_fresh: bool
 
     request_soc_reset_pack_ids: tuple[str, ...]
@@ -199,6 +200,7 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         alarms=_aggregate_alarms(inputs.packs),
         cable_alarm=AlarmSeverity.OK if in_startup_grace else _cable_alarm(all_packs_fresh, shunt_configured, shunt_fresh),
         all_packs_fresh=all_packs_fresh,
+        fresh_pack_count=len(fresh_packs),
         shunt_fresh=shunt_fresh,
         request_soc_reset_pack_ids=request_soc_reset_pack_ids,
         charge_limit_detail=charge_limit,
