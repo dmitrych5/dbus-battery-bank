@@ -1,0 +1,104 @@
+from pathlib import Path
+
+import pytest
+
+from battery_bank.config import load_config
+from battery_bank.core.bank import BankInputs, ControlState, step_bank
+from battery_bank.core.charge_stage import ChargeStage
+from battery_bank.core.protections import ProtectionState, TripKind
+from battery_bank.persistence.state_file import (
+    PersistedState,
+    StateFile,
+    StateFileError,
+    restore_control_state,
+    to_persisted,
+)
+from tests.test_bank import healthy_inputs, make_packs, make_shunt
+
+CONFIG = load_config(Path(__file__).parent.parent / "config.example.ini")
+
+
+class TestStateFile:
+    def test_round_trip(self, tmp_path):
+        state = PersistedState(tripped=frozenset({TripKind.PTC_DEVIATION}), charge_stage=ChargeStage.FLOAT, cvl_volts=53.2)
+        store = StateFile(tmp_path / "state.json")
+        store.save(state)
+        assert StateFile(tmp_path / "state.json").load() == state
+
+    def test_missing_file_loads_defaults(self, tmp_path):
+        assert StateFile(tmp_path / "state.json").load() == PersistedState()
+
+    def test_identical_state_is_not_rewritten(self, tmp_path):
+        path = tmp_path / "state.json"
+        store = StateFile(path)
+        store.save(PersistedState())
+        path.write_text("externally changed")
+        store.save(PersistedState())
+        assert path.read_text() == "externally changed"
+
+    def test_changed_state_is_rewritten(self, tmp_path):
+        path = tmp_path / "state.json"
+        store = StateFile(path)
+        store.save(PersistedState())
+        store.save(PersistedState(charge_stage=ChargeStage.FLOAT))
+        assert StateFile(path).load().charge_stage is ChargeStage.FLOAT
+
+    def test_corrupt_file_raises_and_is_quarantined(self, tmp_path):
+        path = tmp_path / "state.json"
+        path.write_text('{"version": 1, "tripped": ["NO_SUCH_TRIP"], "charge_stage": "BULK", "cvl_volts": null}')
+        with pytest.raises(StateFileError, match="corrupt state file"):
+            StateFile(path).load()
+        assert not path.exists()
+        assert (tmp_path / "state.json.corrupt").exists()
+        # The next start is not blocked.
+        assert StateFile(path).load() == PersistedState()
+
+    def test_unsupported_version_raises(self, tmp_path):
+        path = tmp_path / "state.json"
+        path.write_text('{"version": 99, "tripped": [], "charge_stage": "BULK", "cvl_volts": null}')
+        with pytest.raises(StateFileError):
+            StateFile(path).load()
+
+
+class TestRestore:
+    def test_trips_survive_a_restart_and_keep_limits_at_zero(self):
+        persisted = PersistedState(tripped=frozenset({TripKind.PTC_DEVIATION}))
+        restored = restore_control_state(persisted, CONFIG, now_monotonic=500.0)
+        _, decision, _ = step_bank(CONFIG, restored, healthy_inputs(), now_monotonic=1001.0)
+        assert decision.ready is True
+        assert decision.ccl_amps == 0.0
+        assert decision.protections.zero_limits_required is True
+
+    def test_absorption_hold_restarts_after_restore(self):
+        persisted = PersistedState(charge_stage=ChargeStage.ABSORPTION, cvl_volts=57.6)
+        restored = restore_control_state(persisted, CONFIG, now_monotonic=1000.0)
+        full_packs = make_packs(cell_voltages_volts=(3.61,) * 16, soc_percent=97.0)
+        _, decision, _ = step_bank(CONFIG, restored, BankInputs(packs=full_packs, shunt=make_shunt()), now_monotonic=1001.0)
+        assert decision.charge_stage is ChargeStage.ABSORPTION
+        state, decision, _ = step_bank(
+            CONFIG,
+            restored,
+            BankInputs(packs=make_packs(taken_at=1121.5, cell_voltages_volts=(3.61,) * 16, soc_percent=97.0), shunt=make_shunt(taken_at=1121.5)),
+            now_monotonic=1122.0,
+        )
+        assert decision.charge_stage is ChargeStage.FLOAT_TRANSITION
+
+    def test_float_transition_resumes_ramping_from_persisted_cvl(self):
+        persisted = PersistedState(charge_stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=55.0)
+        restored = restore_control_state(persisted, CONFIG, now_monotonic=1000.0)
+        inputs = BankInputs(packs=make_packs(taken_at=1100.0, soc_percent=97.0), shunt=make_shunt(taken_at=1100.0))
+        _, decision, _ = step_bank(CONFIG, restored, inputs, now_monotonic=1100.0)
+        assert decision.charge_stage is ChargeStage.FLOAT_TRANSITION
+        assert decision.cvl_volts == pytest.approx(55.0 - 0.001 * 100.0)
+
+    def test_reduced_cvl_gets_a_fresh_recovery_hold(self):
+        persisted = PersistedState(charge_stage=ChargeStage.BULK, cvl_volts=57.0)
+        restored = restore_control_state(persisted, CONFIG, now_monotonic=1000.0)
+        assert restored.charge_stage.cvl_reduced_at == 1000.0
+
+    def test_to_persisted_round_trips_through_control_state(self):
+        state, _, _ = step_bank(CONFIG, ControlState(), healthy_inputs(), now_monotonic=1001.0)
+        persisted = to_persisted(state)
+        assert persisted.charge_stage is ChargeStage.BULK
+        assert persisted.cvl_volts == pytest.approx(57.6)
+        assert persisted.tripped == frozenset()
