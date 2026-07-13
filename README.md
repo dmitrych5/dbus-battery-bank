@@ -4,6 +4,7 @@ A Venus OS service that manages a bank of JBD UP16S BMS packs and publishes them
 Victron battery (plus read-only per-pack services for VRM logging).
 
 Requirements, architecture, and design decisions live in [CLAUDE.md](CLAUDE.md).
+Building the custom browser GUI (WASM) is documented in [scripts/README.md](scripts/README.md).
 
 ## Operations
 
