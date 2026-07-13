@@ -12,7 +12,9 @@ BRANCH="dbus-serialbattery/venus-os_v3.6x/gui-v2_v1.1.x"
 OUT_DIR="$PROJECT_DIR/build/wasm"
 mkdir -p "$OUT_DIR"
 
-docker run --rm \
+# amd64: the upstream toolchain (aqtinstall Qt + emsdk) has no Linux ARM64 build; on Apple
+# Silicon this runs through Rosetta (colima start --vm-type vz --vz-rosetta).
+docker run --rm --platform linux/amd64 \
     -v "$PROJECT_DIR:/src:ro" \
     -v "$OUT_DIR:/out" \
     -e BRANCH="$BRANCH" \
