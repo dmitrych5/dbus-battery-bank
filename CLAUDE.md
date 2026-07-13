@@ -4,7 +4,7 @@ A single Venus OS service that manages a bank of JBD UP16S BMS packs and publish
 `com.victronenergy.battery` D-Bus service for DVCC. It replaces the previously used pair of
 dbus-serialbattery (fork) + dbus-aggregate-batteries. Reference implementations for behavioral
 parity live in `../venus-os_dbus-serialbattery` and `../dbus-aggregate-batteries`; the deployed
-configuration lives in `../dbus-battery-configs`.
+configuration lives in `../dbus-battery-configs/dbus-battery-bank-config.ini`.
 
 The project is designed for one specific installation but keeps the BMS protocol behind a driver
 interface so other battery types could be added later — only where that costs no maintainability.
@@ -51,6 +51,8 @@ interface so other battery types could be added later — only where that costs 
 
 ## Code quality standards
 
+- The quality bar is deliberately high: the code must be well-designed, maintainable, concise,
+  readable and well-structured, far above the typical quality seen in most codebases.
 - No pattern duplication or code duplication, to a reasonable extent. Charge/discharge symmetry,
   repeated limit curves, repeated error handling — all expressed once, parameterized.
 - Clear, concise, unambiguous naming supersedes comments: name things first; add a comment only
