@@ -277,6 +277,14 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
    process, direct-connection detection can likely be automatic (probe IndividualPackStatus)
    instead of configured.
 
+4. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
+   temperature at roughly the same time of day yesterday resembles today better than a
+   many-hours-old state from today. Idea to explore: every few hours persist per-hour data
+   points for the last ~25 hours (25 so the current time of day exists for both today and
+   yesterday); on restore, extrapolate the expected change from three known points — the first
+   and last points in the window plus the point matching the launch time of day — to
+   reconstruct a better thermal estimate than pure rate extrapolation allows.
+
 Behavior changes to proven battery-handling logic beyond this list are discussed before
 implementation.
 

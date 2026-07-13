@@ -55,8 +55,10 @@ class ProtectionsResult:
     ptc: PtcDiagnostics | None
 
 
-THERMAL_RESTORE_MAX_AGE_SECONDS = 24 * 3600.0
-"""Beyond this downtime a persisted thermal state says nothing useful; start cold."""
+THERMAL_RESTORE_MAX_AGE_SECONDS = 6 * 3600.0
+"""Beyond this age a persisted thermal state says nothing useful; start cold. Must stay
+comfortably above the main loop's thermal save cadence, since the persisted snapshot is up to
+one cadence old even before any downtime is added."""
 RESTORED_VALUE_VARIANCE = 1.0
 RESTORED_RATE_VARIANCE = 1e-8
 """Covariance priors after a restart (about ±1 C on the value, ±1e-4 C/s on the rate):

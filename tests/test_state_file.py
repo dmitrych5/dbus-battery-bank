@@ -131,8 +131,8 @@ class TestThermalRestore:
         # puts the corrected estimate about 2.9 C above the readings, with no warmup blackout.
         assert decision.protections.ptc.corrected_temperature_celsius == pytest.approx(20.0 + 2.88, abs=0.5)
 
-    def test_snapshot_older_than_a_day_starts_cold(self):
-        restored = restore_control_state(self.persisted_thermal(saved_at=0.0), CONFIG, now_monotonic=100.0, now_wall_seconds=25 * 3600.0)
+    def test_snapshot_older_than_the_max_age_starts_cold(self):
+        restored = restore_control_state(self.persisted_thermal(saved_at=0.0), CONFIG, now_monotonic=100.0, now_wall_seconds=7 * 3600.0)
         assert restored.protections.thermal.updates_count == 0
         assert restored.protections.thermal.kalman.last_time is None
 
