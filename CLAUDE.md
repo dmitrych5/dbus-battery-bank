@@ -338,6 +338,43 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
 Behavior changes to proven battery-handling logic beyond this list are discussed before
 implementation.
 
+## Current status and next steps (as of 2026-07-13)
+
+The system is commissioned and permanent: the service runs on the Cerbo, all parity checks
+passed, and the custom browser WASM is built (natively via `scripts/build-wasm-macos.sh`,
+minutes per rebuild thanks to the persistent toolchain) and installed. The operator verified
+the browser UI: pages work, "Battery service settings" with the trip-reset button, and the
+"PTC voltage ×10" / "PTC deviation" row titles.
+
+Pending verification: the first full charge cycle under the new stack — the log should show
+`Charge stage: Bulk -> Absorption -> Float Transition -> Float` plus one
+"Successfully set SOC ... to 100.00%" per pack (grep the log on the device; also check VRM
+that CVL dropped to float afterwards).
+
+Next tasks, in priority order:
+
+1. **Trip-reset button: show only when tripped, next to the PTC rows.** Not a Venus
+   limitation; three small pieces: (a) publish a trip-state path on the aggregate, e.g.
+   `/ProtectionTripped` (1 while any trip is latched — derive from
+   `decision.protections.state.tripped` in service_values), (b) in our `PageBattery.qml`
+   copies, add the confirmed reset button near the PTC rows with
+   `preferredVisible: productId.value === 0xBA44 && protectionTrippedItem.valid &&
+   protectionTrippedItem.value === 1` (keep or drop the settings-page copy at taste),
+   (c) rebuild QML + WASM and deploy. Bind the button to `/Settings/ResetProtectionTrips`
+   exactly as the settings-page one.
+2. **History module** (operator uses the History screen). A small pure accumulator in the
+   core, fed per step from snapshots/decision; persisted in the state file (wall-clock
+   timestamps where needed); published on `/History/*` including `/History/Clear`
+   (writable; clears categories like the old driver) and `/History/CanBeCleared = 1` (its
+   absence causes the GUI's confusing "reset on the monitor itself" hint). Values: lifetime
+   min/max voltage and cell voltage, min/max temperature, low/high voltage alarm counts
+   (edge-triggered from the aggregated alarms), deepest/last/average discharge, charged and
+   discharged energy (integrate bank power over time), time since last full charge (stamped at
+   FloatTransition entry). BMS-provided charge cycles and total Ah drawn already publish on
+   the pack services.
+3. Roadmap items below (balancer-aware float switch retiring `cvl_charger_offset_volts`,
+   diurnal thermal restore, master-limit/`require_direct_connection` simplifications).
+
 ## Decided details
 
 - **Ambient temperature UI**: published on `/AirTemperature`, which stock GUI-v2 renders as a
