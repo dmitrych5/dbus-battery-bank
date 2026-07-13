@@ -76,10 +76,8 @@ if [ -f "$WASM_ZIP" ] && [ -d /var/www/venus ]; then
         unzip -oq "$WASM_ZIP" -d /tmp
         rm -rf "$WWW_GUI_DIR"
         mv /tmp/wasm "$WWW_GUI_DIR"
-        cd "$WWW_GUI_DIR"
-        # The gzip copy and hash file are expected by the VRM portal check.
-        [ -f venus-gui-v2.wasm.gz ] || gzip -k venus-gui-v2.wasm
-        sha256sum venus-gui-v2.wasm > venus-gui-v2.wasm.sha256
+        # The zip already contains venus-gui-v2.wasm.gz (served by the web server in place of
+        # the raw file) and the .sha256 the VRM portal check expects.
         echo "$zip_hash" > "$WASM_MARKER"
         if [ -e /service/vrmlogger ]; then
             svc -t /service/vrmlogger
