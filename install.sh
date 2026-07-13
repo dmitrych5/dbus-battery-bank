@@ -5,10 +5,13 @@
 # The old stack's files are never deleted — its serial-starter config moves into
 # old-stack-backup/ and its rc.local lines are commented out with a recognizable marker.
 #
-# Deliberately no udev/serial-starter exclusion rules in this version: without the old
-# serial-starter config, serial-starter probes the battery port with other drivers, which is
-# exactly the interference the pollers detect and ride out (proven for half a year on the old
-# stack). Exclusion rules can be added later as an optimization.
+# A udev rule keeping serial-starter off the battery port is REQUIRED (commissioning finding):
+# unlike the old stack, where serial-starter itself launched the driver and therefore owned the
+# port, this service takes the port away, and serial-starter's endless probing opens it
+# concurrently — which does not just change the termios settings but makes pyserial reads fail
+# outright. Create /data/etc/udev/rules.d/<n>-ignore-battery-bank-battery-port.rules matching
+# the adapter (see COMMISSIONING.md), symlink it from /etc/udev/rules.d/ in /data/rc.local, and
+# reload + trigger udev. The shunt port needs the same, which this installation already had.
 #
 # The old driver's custom GUI-v2 pages must stay installed: the new services reuse them (they
 # key on the same ProductIds), so do not run the old stack's custom-gui-uninstall.sh.

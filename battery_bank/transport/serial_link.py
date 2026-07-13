@@ -3,9 +3,10 @@
 Another process (typically serial-starter probing the port) can change the serial port
 settings mid-communication. Depending on the setup, such interference can affect communication
 up to almost every attempt, so callers detect it via interference_detected() and reopen the
-port, which restores the communication parameters. The install deliberately ships no
-serial-starter exclusion rules (nothing invasive), so probing interference is expected and
-ridden out; exclusion rules can be added later as an optimization.
+port, which restores the communication parameters. Concurrent opens can also make reads fail
+outright ("device reports readiness to read but returned no data"), which no in-process
+handling can ride out for long — the udev rules keeping serial-starter off the ports (see
+install.sh) are therefore required; this detection remains as a safety net.
 """
 
 import logging

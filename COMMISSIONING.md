@@ -4,6 +4,17 @@ The swap is fully reversible at every step: `revert.sh` restores the old stack e
 the old stack is started again with its usual `enable.sh` / `restart.sh`. The system runs on
 grid power during commissioning, so brief zero-limit periods are acceptable.
 
+Status 2026-07-13: the swap was performed and the system runs on dbus-battery-bank. Items
+below are marked done where verified; the remaining ones need the operator (physical access,
+VRM account, GUI screen). Two commissioning findings are folded back into the project: Venus
+OS ships Python without the `statistics` module, and a udev `VE_SERVICE=ignore` rule for the
+battery port is required (created on the device as
+`/data/etc/udev/rules.d/11-ignore-battery-bank-battery-port.rules`, symlinked from
+`/data/rc.local`) — serial-starter's probing of the freed port makes reads fail outright.
+Note for future firmware upgrades: the old stack's rc.local line used to reinstall the custom
+GUI on boot and is now disabled, so after a firmware upgrade the GUI pages need
+`custom-gui-install.sh` rerun manually (until phase-2 QML ships with this project).
+
 ## Prepare (old stack still running)
 
 - [ ] Copy the repository to the Cerbo: `rsync -r --exclude .venv --exclude .git . root@<cerbo>:/data/apps/dbus-battery-bank/`
