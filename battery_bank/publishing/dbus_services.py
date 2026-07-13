@@ -112,8 +112,10 @@ class DbusBatteryService:
         self._service.add_path("/State", self.STATE_RUNNING, writeable=True)
         # None until a real error, so the GUI hides the error row.
         self._service.add_path("/ErrorCode", None, writeable=True)
+        # Read-only on the bus: other processes must not overwrite measurements or limits.
+        # update() sets values locally, which the writeable flag does not gate.
         for path, value in initial_values.items():
-            self._service.add_path(path, value, writeable=True)
+            self._service.add_path(path, value)
         for path, on_change in (writable_paths or {}).items():
             self._service.add_path(path, 0, writeable=True, onchangecallback=on_change)
         self._service.register()
