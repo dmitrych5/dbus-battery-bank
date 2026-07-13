@@ -28,7 +28,7 @@ from battery_bank.core.protections import reset_trips
 from battery_bank.core.values import BatterySnapshot
 from battery_bank.persistence.state_file import PersistedState, StateFile, StateFileError, restore_control_state, to_persisted
 from battery_bank.publishing import dbus_services
-from battery_bank.publishing.diagnostics_text import diagnostics_values
+from battery_bank.publishing.diagnostics_text import diagnostics_values, pack_diagnostics_values
 from battery_bank.publishing.service_values import (
     aggregate_service_values,
     history_service_values,
@@ -174,6 +174,7 @@ class BatteryBankService:
         values = pack_service_values(self._config, decision, snapshot)
         pack_history = self._pack_history.get(snapshot.identity.unique_id, HistoryState())
         values.update(pack_history_service_values(pack_history.values))
+        values.update(pack_diagnostics_values(decision, snapshot, time.monotonic()))
         return values
 
     def _publish(self, decision: BankDecision, inputs: BankInputs) -> None:

@@ -115,6 +115,20 @@ class TestPackServiceValues:
         assert values["/Alarms/LowSoc"] == 0
 
 
+class TestProtectionTrippedPath:
+    def test_zero_when_healthy_and_one_while_latched(self):
+        import dataclasses
+
+        from battery_bank.core.protections import ProtectionState, TripKind
+
+        decision, inputs = healthy_decision()
+        assert aggregate_service_values(CONFIG, decision, inputs.packs, inputs.shunt)["/ProtectionTripped"] == 0
+        tripped = dataclasses.replace(
+            decision, protections=dataclasses.replace(decision.protections, state=ProtectionState(tripped=frozenset({TripKind.PTC_DEVIATION})))
+        )
+        assert aggregate_service_values(CONFIG, tripped, inputs.packs, inputs.shunt)["/ProtectionTripped"] == 1
+
+
 class TestServiceInternalAlarm:
     def test_internal_failure_alarm_raised_for_service_faults(self):
         decision, inputs = healthy_decision()

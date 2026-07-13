@@ -70,6 +70,8 @@ def aggregate_service_values(
         "/Info/ChargeMode": decision.charge_stage.value,
         "/Info/ChargeLimitation": _bank_limitation_text(decision, decision.charge_limit_detail),
         "/Info/DischargeLimitation": _bank_limitation_text(decision, decision.discharge_limit_detail),
+        # 1 while any protection trip is latched; the GUI shows its reset button only then.
+        "/ProtectionTripped": int(bool(decision.protections.state.tripped)),
     }
     values.update(_cell_extremes(packs))
     values.update(_alarm_values(decision.alarms))

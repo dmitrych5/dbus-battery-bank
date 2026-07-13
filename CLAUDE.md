@@ -213,25 +213,29 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   (per-Venus-version sets under `qml/gui-v2/`; the 3.6x set serves firmware ≤ v3.69, 3.7x
   serves ≤ v3.79), installed over the stock ones via the overlay-fs app by
   `custom-gui-install.sh`, which `enable.sh` runs on every boot so Cerbo firmware upgrades
-  heal themselves. Changes vs the old driver's pages: the settings entry also shows for the
-  aggregate (ProductId 0xBA44) and hosts a confirmed "Reset protection trips" control bound to
-  `/Settings/ResetProtectionTrips`. Use plain strings for labels we add — our translation ids
-  are not in Victron's compiled catalog. These pages are currently invisible on this
-  installation (Remote Console runs GUI-v1); trip reset is done via ssh:
-  `dbus -y com.victronenergy.battery.aggregate /Settings/ResetProtectionTrips SetValue 1`.
-- Browser WASM status: the old driver installed mr-manuel's custom WASM build into
-  `/var/www/venus/gui-v2` (that is why the browser shows the battery pages, including for the
-  aggregate). It keeps working with this project's services (same ProductIds and paths) and
-  survives firmware upgrades via the overlay — but it is now frozen, since the old driver's
-  update mechanism no longer runs. Future task: build this project's own WASM (mr-manuel's
-  venus-os_dbus-serialbattery_gui-v2 build pipeline, with our changed pages) so the
-  trip-reset control reaches the browser and the WASM tracks firmware versions again; until
-  then, check that the WASM still works after each firmware upgrade.
+  heal themselves. For this project's services (aggregate 0xBA44, packs 0xBA77) `PageBattery`
+  folds the former "dbus-serialbattery - General" page into the main battery page (overview
+  and temperature tiles, power, charge mode, CVL/CCL/DCL with limitation text, allow-to,
+  active alarms) and hides the stock rows/submenus that layout supersedes (Battery V/I/P
+  group, battery temperature row — the Temperatures tiles cover it —, IO and Parameters
+  submenus, per-pack Details); `/AirTemperature` is titled "Ambient temperature"; the debug
+  texts live in a "Debug" submenu (`PageBatteryBankDebug.qml`); a confirmed "Reset protection
+  trips" button sits at the very top of the aggregate's page while `/ProtectionTripped` is 1
+  (plus the always-available copy in "Battery service settings"). Other battery services keep
+  the stock layout. Use plain strings for labels we add — our translation ids are not in
+  Victron's compiled catalog.
+- Browser WASM: built by `scripts/build-wasm-macos.sh` from mr-manuel's venus-os_gui-v2 fork
+  with this project's pages applied by `scripts/patch-gui-v2-fork.py` (which also registers
+  new page files in the fork's CMakeLists — replacing a stock page needs no registration,
+  adding one does); shipped as `wasm/venus-webassembly.zip` and installed by
+  `custom-gui-install.sh`. A QML change reaches the browser only after a WASM rebuild.
 - The Ambient tile substitution in the Temperatures row was dropped: the native "Air
   temperature" row proved sufficient.
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
-  bank-level, so per-pack float/bulk state has no meaning; the aggregate carries the full
-  diagnostics.
+  bank-level, so per-pack float/bulk state has no meaning. The pack "Debug" submenu instead
+  shows the pack's own contribution to the bank decision (`pack_diagnostics_values`: its
+  CCL/DCL with active sources, BMS and chain-aggregated limits, FET/balancing state, data
+  age); the aggregate carries the full bank diagnostics.
 - History, split by data source (the GUI groups it with headers; see the shipped
   `PageBatteryHistory.qml`):
   - **Shunt-provided** (aggregate only): the SmartShunt's own lifetime history — deepest/last/
@@ -411,33 +415,24 @@ that CVL dropped to float afterwards).
 
 Next tasks, in priority order:
 
-1. **Trip-reset button: show only when tripped, next to the PTC rows.** Not a Venus
-   limitation; three small pieces: (a) publish a trip-state path on the aggregate, e.g.
-   `/ProtectionTripped` (1 while any trip is latched — derive from
-   `decision.protections.state.tripped` in service_values), (b) in our `PageBattery.qml`
-   copies, add the confirmed reset button near the PTC rows with
-   `preferredVisible: productId.value === 0xBA44 && protectionTrippedItem.valid &&
-   protectionTrippedItem.value === 1` (keep or drop the settings-page copy at taste),
-   (c) rebuild QML + WASM and deploy. Bind the button to `/Settings/ResetProtectionTrips`
-   exactly as the settings-page one.
-2. **Verify the history module on the device** (implemented; see "Calculated history" under
-   Publishing): after a deploy, check the aggregate's History page in the browser WASM fills
-   in over a day (energies, discharge cycle after the first full charge), that VRM behaves,
-   and that `state.json` gains the `history` block without excessive write churn.
-3. Roadmap items below (balancer-aware float switch retiring `cvl_charger_offset_volts`,
+1. **Verify the history module and the reworked battery pages on the device** (implemented;
+   see "History, split by data source" and the GUI-v2 QML bullet under Publishing): after a
+   WASM rebuild and deploy, check the aggregate's and packs' History pages fill in, the
+   restructured main battery page reads well, the trip-reset button appears when a trip is
+   latched, and that `state.json` grows its history blocks without excessive write churn.
+2. Roadmap items below (balancer-aware float switch retiring `cvl_charger_offset_volts`,
    diurnal thermal restore, master-limit/`require_direct_connection` simplifications).
 
 ## Decided details
 
-- **Ambient temperature UI**: published on `/AirTemperature`, which stock GUI-v2 renders as a
-  native "Air temperature" row (no patching). Additionally, in the project's own
-  `PageBatteryDbusSerialbattery.qml` "Temperatures" overview row, the first tile shows ambient
-  labeled "Ambient" instead of the `/Dc/0/Temperature` average (which is redundant with the
-  Temp 1–4 tiles beside it) — a UI-only substitution; `/Dc/0/Temperature` itself stays the
-  cell-sensor aggregate for VRM/DVCC/stock pages. The tile's red-highlight-when-limiting logic
-  must recognize ambient as a limitation source (limitation-string labels and the QML check must
-  agree). Verify whether VRM logs `/AirTemperature` once live; if not and drift monitoring of
-  ambient is wanted, route it through the contained VRM metric-map module.
+- **Ambient temperature UI**: published on `/AirTemperature`, shown on the battery page as an
+  "Ambient temperature" row for our services (other products keep the stock "Air temperature"
+  title); `/Dc/0/Temperature` stays the cell-sensor aggregate for VRM/DVCC/stock pages. The
+  Temperatures tiles' red-highlight-when-limiting checks must keep matching the
+  `LimitSource` limitation strings (they compare lowercased text: "cell voltage",
+  "cell temperature", "mosfet"). Verify whether VRM logs `/AirTemperature` once live; if not
+  and drift monitoring of ambient is wanted, route it through the contained VRM metric-map
+  module.
 - **Operator reset of latched trips**: a button in the shipped GUI-v2 settings page backed by a
   writable dbus path with a change callback — the same proven mechanism as the existing
   `/Settings/ResetSocTo` control. The reset emits an Event so it is logged and auditable.

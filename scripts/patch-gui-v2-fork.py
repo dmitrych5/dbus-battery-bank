@@ -1,10 +1,11 @@
 """Applies this project's GUI changes to a checkout of mr-manuel's venus-os_gui-v2 fork
 (branch dbus-serialbattery/venus-os_v3.6x/gui-v2_v1.1.x) before the WASM build.
 
-PageBattery.qml and PageBatteryHistory.qml are dropped in whole (PageBattery is
-byte-identical between that branch and our qml/gui-v2/3.6x base; the history page is this
-project's own layout). The settings page is newer on the branch (ResetSocToApply), so the
-trip-reset control is inserted instead of replacing the file.
+Our whole-page copies (PageBattery, the history page, the debug page) are dropped in whole,
+with new pages also registered in the fork's CMakeLists. The settings page is newer on the
+branch (ResetSocToApply), so the trip-reset control is inserted instead of replacing the
+file. The fork's PageBatteryDbusSerialbattery.qml stays in the build but is unreferenced —
+our PageBattery folds its content into the main battery page.
 """
 
 import sys
@@ -12,6 +13,10 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent.parent
 PAGES_SUBDIR = "pages/settings/devicelist/battery"
+
+REPLACED_PAGES = ("PageBattery.qml", "PageBatteryHistory.qml", "PageBatteryBankDebug.qml")
+CMAKE_REGISTRATION_ANCHOR = f"    {PAGES_SUBDIR}/PageBatteryDbusSerialbattery.qml\n"
+NEW_PAGES_TO_REGISTER = ("PageBatteryBankDebug.qml",)
 
 TRIP_RESET_ANCHOR = """\t\t\t\tVeQuickItem {
 \t\t\t\t\tid: resetSocToApplyItem
@@ -35,9 +40,21 @@ def main() -> None:
     fork_dir = Path(sys.argv[1])
     pages_dir = fork_dir / PAGES_SUBDIR
 
-    for page_name in ("PageBattery.qml", "PageBatteryHistory.qml"):
+    for page_name in REPLACED_PAGES:
         (pages_dir / page_name).write_text((PROJECT_DIR / "qml/gui-v2/3.6x" / page_name).read_text())
         print(f"{page_name} replaced with our edited copy")
+
+    cmake_path = fork_dir / "CMakeLists.txt"
+    cmake_text = cmake_path.read_text()
+    for page_name in NEW_PAGES_TO_REGISTER:
+        if f"{PAGES_SUBDIR}/{page_name}" in cmake_text:
+            print(f"{page_name} already registered in CMakeLists.txt")
+            continue
+        if CMAKE_REGISTRATION_ANCHOR not in cmake_text:
+            raise SystemExit("ERROR: CMakeLists registration anchor not found; the branch layout changed")
+        cmake_text = cmake_text.replace(CMAKE_REGISTRATION_ANCHOR, CMAKE_REGISTRATION_ANCHOR + f"    {PAGES_SUBDIR}/{page_name}\n")
+        print(f"{page_name} registered in CMakeLists.txt")
+    cmake_path.write_text(cmake_text)
 
     settings_path = pages_dir / "PageBatteryDbusSerialbatterySettings.qml"
     settings_text = settings_path.read_text()

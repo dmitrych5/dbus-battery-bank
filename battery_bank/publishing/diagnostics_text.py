@@ -6,9 +6,46 @@ can never drift from the control behavior."""
 from typing import Sequence
 
 from battery_bank.config import Config
-from battery_bank.core.bank import BankDecision, ControlState, SocSource
+from battery_bank.core.bank import BankDecision, ControlState
 from battery_bank.core.charge_stage import ChargeStage
+from battery_bank.core.current_limits import BankCurrentLimit
 from battery_bank.core.values import BatterySnapshot, ShuntSnapshot
+from battery_bank.publishing.service_values import limitation_text
+
+
+def pack_diagnostics_values(decision: BankDecision, snapshot: BatterySnapshot, now_monotonic: float) -> dict[str, str]:
+    """One pack's debug text: the pieces of the bank decision that are specific to this pack
+    (its limit contributions and their sources, what its BMS reports, FET/balancing state,
+    data freshness). Bank-level state lives in the aggregate's diagnostics."""
+    pack = snapshot
+    lines = [
+        _pack_limit_line("CCL", decision.charge_limit_detail, pack.identity.unique_id),
+        _pack_limit_line("DCL", decision.discharge_limit_detail, pack.identity.unique_id),
+        f"BMS limits: charge {pack.bms_limits.charge_current_amps:.0f} A • discharge {pack.bms_limits.discharge_current_amps:.0f} A"
+        f" • CVL {pack.bms_limits.charge_voltage_volts:.2f} V",
+    ]
+    if pack.chain_aggregated_limits is not None:
+        lines.append(
+            f"chain limits (master): charge {pack.chain_aggregated_limits.charge_current_amps:.0f} A"
+            f" • discharge {pack.chain_aggregated_limits.discharge_current_amps:.0f} A"
+        )
+    lines += [
+        f"FETs: charge {_on_off(pack.charge_fet_enabled)} • discharge {_on_off(pack.discharge_fet_enabled)}"
+        f" • balancing: {sum(pack.cells_balancing)} cells",
+        f"data age: {now_monotonic - pack.taken_at_monotonic:.1f} s",
+    ]
+    return {"/Info/ChargeModeDebug": "\n".join(lines)}
+
+
+def _pack_limit_line(label: str, detail: BankCurrentLimit | None, unique_id: str) -> str:
+    pack_limit = next((limit for limit in detail.per_pack if limit.pack_unique_id == unique_id), None) if detail is not None else None
+    if pack_limit is None:
+        return f"{label}: n/a (no fresh bank decision)"
+    return f"{label}: {pack_limit.amps:.1f} A ({limitation_text(pack_limit.active_sources, held_at_zero=False)})"
+
+
+def _on_off(enabled: bool) -> str:
+    return "on" if enabled else "OFF"
 
 
 def diagnostics_values(
