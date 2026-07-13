@@ -37,7 +37,10 @@ def aggregate_service_values(
     decision: BankDecision,
     packs: Sequence[BatterySnapshot],
     shunt: ShuntSnapshot | None,
+    service_internal_alarm: bool = False,
 ) -> dict[str, object]:
+    """service_internal_alarm raises /Alarms/InternalFailure for faults of this service itself
+    (corrupt state file, repeated cycle failures) — the log alone is not operator-visible."""
     expected_pack_count = sum(len(port.pack_addresses) for port in config.battery_ports)
     remaining_ah = sum(pack.remaining_capacity_ah for pack in packs)
     values: dict[str, object] = {
@@ -72,6 +75,8 @@ def aggregate_service_values(
     values.update(_cell_extremes(packs))
     values.update(_alarm_values(decision.alarms))
     values["/Alarms/BmsCable"] = int(decision.cable_alarm)
+    if service_internal_alarm:
+        values["/Alarms/InternalFailure"] = int(AlarmSeverity.ALARM)
     values.update(vrm_metric_workarounds(decision, packs, shunt))
     return values
 

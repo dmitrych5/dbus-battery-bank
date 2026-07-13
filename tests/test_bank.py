@@ -212,3 +212,15 @@ class TestAlarmAggregation:
         )
         _, decision, _ = step_bank(CONFIG, ControlState(), BankInputs(packs=packs, shunt=make_shunt()), now_monotonic=1001.0)
         assert decision.alarms.internal_failure is AlarmSeverity.ALARM
+
+
+class TestTripAlarms:
+    def test_latched_trip_raises_the_high_temperature_alarm(self):
+        packs_hot = make_packs()[:2] + (
+            make_snapshot(unique_id="pack-3", address=3, cell_temperatures_celsius=(35.0,) * 4),
+        )
+        state, decision, _ = step_bank(CONFIG, ControlState(), BankInputs(packs=packs_hot, shunt=make_shunt()), now_monotonic=1001.0)
+        assert decision.alarms.high_temperature is AlarmSeverity.ALARM
+        # The alarm persists with healthy inputs for as long as the trip is latched.
+        _, decision, _ = step_bank(CONFIG, state, healthy_inputs(), now_monotonic=1002.0)
+        assert decision.alarms.high_temperature is AlarmSeverity.ALARM

@@ -113,3 +113,12 @@ class TestPackServiceValues:
         values = pack_service_values(decision, pack)
         assert values["/Alarms/InternalFailure"] == 2
         assert values["/Alarms/LowSoc"] == 0
+
+
+class TestServiceInternalAlarm:
+    def test_internal_failure_alarm_raised_for_service_faults(self):
+        decision, inputs = healthy_decision()
+        values = aggregate_service_values(CONFIG, decision, inputs.packs, inputs.shunt, service_internal_alarm=True)
+        assert values["/Alarms/InternalFailure"] == 2
+        values = aggregate_service_values(CONFIG, decision, inputs.packs, inputs.shunt)
+        assert values["/Alarms/InternalFailure"] == 0

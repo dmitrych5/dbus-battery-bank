@@ -197,7 +197,7 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         allow_to_discharge=dcl_amps > 0.0,
         charge_stage=stage,
         **_measurements(inputs, fresh_packs, shunt_fresh),
-        alarms=_aggregate_alarms(inputs.packs),
+        alarms=_raise_trip_alarms(_aggregate_alarms(inputs.packs), protections),
         cable_alarm=AlarmSeverity.OK if in_startup_grace else _cable_alarm(all_packs_fresh, shunt_configured, shunt_fresh),
         all_packs_fresh=all_packs_fresh,
         fresh_pack_count=len(fresh_packs),
@@ -247,6 +247,15 @@ def _aggregate_alarms(packs: Sequence[BatterySnapshot]) -> PackAlarms:
         category: max((getattr(pack.alarms, category) for pack in packs), default=AlarmSeverity.OK) for category in ALARM_CATEGORIES
     }
     return PackAlarms(**severities)
+
+
+def _raise_trip_alarms(alarms: PackAlarms, protections: ProtectionsResult) -> PackAlarms:
+    """Latched trips must reach the operator through VRM notifications, not only through zero
+    limits and the log: both current trip kinds are overheat responses, so they raise the
+    high-temperature alarm for as long as they stay latched."""
+    if not protections.state.tripped:
+        return alarms
+    return PackAlarms(**{**{category: getattr(alarms, category) for category in ALARM_CATEGORIES}, "high_temperature": AlarmSeverity.ALARM})
 
 
 def _cable_alarm(all_packs_fresh: bool, shunt_configured: bool, shunt_fresh: bool) -> AlarmSeverity:

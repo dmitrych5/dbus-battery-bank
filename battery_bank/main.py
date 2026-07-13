@@ -39,6 +39,7 @@ THERMAL_SAVE_INTERVAL_SECONDS = 2 * 3600.0
 """How often the PTC thermal filter state is worth a flash write; must stay comfortably below
 THERMAL_RESTORE_MAX_AGE_SECONDS."""
 MAX_CONSECUTIVE_CYCLE_FAILURES = 30
+CYCLE_FAILURES_BEFORE_ALARM = 5
 SOC_RESET_PERCENT = 100.0
 
 VICTRON_STATE_ERROR = 10
@@ -67,6 +68,10 @@ class BatteryBankService:
         self._written_thermal = None
         self._consecutive_cycle_failures = 0
         self._mainloop = GLib.MainLoop()
+        self._service_internal_alarm = False
+        """Raises /Alarms/InternalFailure on the aggregate for faults of this service itself
+        (corrupt state file, repeated cycle failures): logs alone never reach the operator.
+        Stays raised until the service restarts cleanly."""
 
     def run(self) -> None:
         self._discover()
@@ -81,15 +86,17 @@ class BatteryBankService:
         try:
             persisted = self._state_file.load()
         except StateFileError:
-            # Fail loud: a lost state file may have cleared safety latches.
+            # Fail loud: a lost state file may have cleared safety latches. The log line alone
+            # would never be noticed, so the internal-failure alarm reaches VRM too.
             logger.exception("State file was corrupt; starting with defaults — any latched protection trips were LOST")
+            self._service_internal_alarm = True
             persisted = PersistedState()
         self._written_thermal = persisted.thermal
         return restore_control_state(persisted, self._config, time.monotonic(), time.time())
 
     def _discover(self) -> bool:
         for poller in self._pack_pollers:
-            for address, info in poller.discover().items():
+            for info in poller.discover().values():
                 if info.unique_id not in self._pack_infos:
                     self._pack_infos[info.unique_id] = info
         expected = sum(len(port.pack_addresses) for port in self._config.battery_ports)
@@ -104,6 +111,8 @@ class BatteryBankService:
         except Exception:
             logger.exception("Cycle failed")
             self._consecutive_cycle_failures += 1
+            if self._consecutive_cycle_failures >= CYCLE_FAILURES_BEFORE_ALARM:
+                self._service_internal_alarm = True
             if self._consecutive_cycle_failures >= MAX_CONSECUTIVE_CYCLE_FAILURES:
                 logger.error("%d consecutive cycle failures; exiting for the supervisor to restart", self._consecutive_cycle_failures)
                 if self._aggregate_service is not None:
@@ -138,7 +147,7 @@ class BatteryBankService:
                 product_name="Battery Bank",
                 hardware_version=None,
                 serial="battery-bank",
-                initial_values=aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt),
+                initial_values=aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt, self._service_internal_alarm),
                 writable_paths={"/Settings/ResetProtectionTrips": self._reset_trips_callback},
             )
         if decision.ready:
@@ -146,7 +155,7 @@ class BatteryBankService:
                 self._ensure_pack_service(snapshot, decision)
 
         if self._aggregate_service is not None:
-            self._aggregate_service.update(aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt))
+            self._aggregate_service.update(aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt, self._service_internal_alarm))
         for unique_id, service in self._pack_services.items():
             snapshot = self._snapshots.get(unique_id)
             if snapshot is not None:
@@ -211,7 +220,9 @@ def publish_config_error_and_wait(error: ConfigError) -> None:
         product_name="Battery Bank",
         hardware_version=None,
         serial="battery-bank",
-        initial_values={"/Info/ChargeLimitation": "Invalid configuration, see the log"},
+        # The alarm path guarantees a VRM notification even if the error state alone does not
+        # produce one.
+        initial_values={"/Info/ChargeLimitation": "Invalid configuration, see the log", "/Alarms/InternalFailure": 2},
     )
     service.set_error(VICTRON_STATE_ERROR, VICTRON_ERROR_CODE_SETTINGS_INVALID)
     GLib.MainLoop().run()
