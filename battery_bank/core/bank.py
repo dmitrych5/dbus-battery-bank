@@ -17,7 +17,7 @@ published, no alarms, no errors), because data sources warming up is normal, not
 when STARTUP_GRACE_SECONDS pass without a complete picture does the incompleteness fail loud.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Sequence
 
@@ -144,9 +144,19 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         staleness_tracking = StalenessTracking(fresh_pack_count=len(fresh_packs), shunt_fresh=shunt_fresh)
 
     aux_voltage = inputs.shunt.aux_voltage_volts if shunt_fresh and inputs.shunt is not None else None
-    protections = step_protections(config.protection, state.protections, fresh_packs, aux_voltage, now_monotonic)
+    protections = step_protections(config.protection, state.protections, fresh_packs, aux_voltage, shunt_fresh, now_monotonic)
     for trip in protections.newly_tripped:
         events.append(Event(EventSeverity.ERROR, f"Protection tripped, limits latched to zero until operator reset: {trip.value}"))
+    if protections.state.aux_missing_alarm != state.protections.aux_missing_alarm:
+        if protections.state.aux_missing_alarm:
+            events.append(
+                Event(
+                    EventSeverity.ERROR,
+                    "No PTC aux voltage in fresh shunt data; PTC overheat protection is inactive — check the shunt Aux input configuration",
+                )
+            )
+        else:
+            events.append(Event(EventSeverity.INFO, "PTC aux voltage reporting again"))
 
     request_soc_reset_pack_ids: tuple[str, ...] = ()
     if all_packs_fresh:
@@ -197,7 +207,7 @@ def step_bank(config: Config, state: ControlState, inputs: BankInputs, now_monot
         allow_to_discharge=dcl_amps > 0.0,
         charge_stage=stage,
         **_measurements(inputs, fresh_packs, shunt_fresh),
-        alarms=_raise_trip_alarms(_aggregate_alarms(inputs.packs), protections),
+        alarms=_raise_protection_alarms(_aggregate_alarms(inputs.packs), protections),
         cable_alarm=AlarmSeverity.OK if in_startup_grace else _cable_alarm(all_packs_fresh, shunt_configured, shunt_fresh),
         all_packs_fresh=all_packs_fresh,
         fresh_pack_count=len(fresh_packs),
@@ -249,13 +259,17 @@ def _aggregate_alarms(packs: Sequence[BatterySnapshot]) -> PackAlarms:
     return PackAlarms(**severities)
 
 
-def _raise_trip_alarms(alarms: PackAlarms, protections: ProtectionsResult) -> PackAlarms:
-    """Latched trips must reach the operator through VRM notifications, not only through zero
-    limits and the log: both current trip kinds are overheat responses, so they raise the
-    high-temperature alarm for as long as they stay latched."""
-    if not protections.state.tripped:
-        return alarms
-    return PackAlarms(**{**{category: getattr(alarms, category) for category in ALARM_CATEGORIES}, "high_temperature": AlarmSeverity.ALARM})
+def _raise_protection_alarms(alarms: PackAlarms, protections: ProtectionsResult) -> PackAlarms:
+    """Protection conditions must reach the operator through VRM notifications, not only through
+    the log: latched trips (both current kinds are overheat responses) raise the high-temperature
+    alarm for as long as they stay latched, and a silently missing PTC input raises an
+    internal-failure warning, because an inoperative protection layer is a fault of its own."""
+    overrides: dict[str, AlarmSeverity] = {}
+    if protections.state.tripped:
+        overrides["high_temperature"] = AlarmSeverity.ALARM
+    if protections.state.aux_missing_alarm:
+        overrides["internal_failure"] = max(alarms.internal_failure, AlarmSeverity.WARNING)
+    return replace(alarms, **overrides) if overrides else alarms
 
 
 def _cable_alarm(all_packs_fresh: bool, shunt_configured: bool, shunt_fresh: bool) -> AlarmSeverity:

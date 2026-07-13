@@ -245,6 +245,9 @@ alarm path, because those are the channel VRM verifiably notifies on:
 - Faults of the service itself — corrupt state file, repeated cycle failures, invalid
   configuration → `/Alarms/InternalFailure` (in addition to the Victron error state for
   invalid config, whose own notification behavior is still to be verified on the device).
+- PTC aux voltage absent from otherwise-fresh shunt data (the PTC protection layer silently
+  inoperative, e.g. the shunt Aux input reconfigured) → `/Alarms/InternalFailure` (WARNING)
+  after a grace period, until the reading returns.
 - BMS-reported alarms pass through their natural categories via worst-per-category
   aggregation.
 - Zero CCL/DCL is itself a loud channel: the operator has a VRM notification configured

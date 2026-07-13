@@ -5,7 +5,7 @@ silently clear a safety response. Diagnostics keep being produced while tripped,
 operator can watch the condition on VRM before resetting.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Sequence
 
@@ -18,6 +18,11 @@ KALMAN_MEASUREMENT_VARIANCE = 0.005
 THERMAL_FILTER_WARMUP_UPDATES = 10
 """The rate estimate is too noisy at first; inertia correction stays off until this many
 temperature samples were absorbed."""
+PTC_AUX_MISSING_ALARM_SECONDS = 600.0
+"""A configured shunt Aux input reports with every frame, so a prolonged absence of the aux
+voltage while the shunt data itself stays fresh means the PTC deviation check is silently
+inoperative (e.g. the Aux input was reconfigured on the shunt) — an independent protection
+layer must not disappear quietly, so this raises an alarm instead of just skipping."""
 
 
 class TripKind(Enum):
@@ -36,6 +41,10 @@ class ThermalInertiaState:
 class ProtectionState:
     tripped: frozenset[TripKind] = frozenset()
     thermal: ThermalInertiaState = ThermalInertiaState()
+    aux_absent_since: float | None = None
+    """When the PTC aux voltage went missing from otherwise-fresh shunt data; None while
+    present (or while its absence is already explained by shunt staleness)."""
+    aux_missing_alarm: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,7 +77,7 @@ rate keeps the inertia correction meaningful immediately."""
 
 def reset_trips(state: ProtectionState) -> ProtectionState:
     """Operator-initiated reset; the only way a latched trip clears."""
-    return ProtectionState(tripped=frozenset(), thermal=state.thermal)
+    return replace(state, tripped=frozenset())
 
 
 def restored_thermal_state(
@@ -106,10 +115,12 @@ def step_protections(
     state: ProtectionState,
     packs: Sequence[BatterySnapshot],
     aux_voltage_volts: float | None,
+    shunt_fresh: bool,
     now_monotonic: float,
 ) -> ProtectionsResult:
     tripped = set(state.tripped)
     newly_tripped: list[TripKind] = []
+    aux_absent_since, aux_missing_alarm = _track_aux_presence(config, state, aux_voltage_volts, shunt_fresh, now_monotonic)
 
     temperature_spread = _temperature_spread_celsius(packs)
     if (
@@ -136,12 +147,32 @@ def step_protections(
             newly_tripped.append(TripKind.PTC_DEVIATION)
 
     return ProtectionsResult(
-        state=ProtectionState(tripped=frozenset(tripped), thermal=thermal),
+        state=ProtectionState(
+            tripped=frozenset(tripped), thermal=thermal, aux_absent_since=aux_absent_since, aux_missing_alarm=aux_missing_alarm
+        ),
         zero_limits_required=bool(tripped),
         newly_tripped=tuple(newly_tripped),
         temperature_spread_celsius=temperature_spread,
         ptc=ptc_diagnostics,
     )
+
+
+def _track_aux_presence(
+    config: ProtectionConfig,
+    state: ProtectionState,
+    aux_voltage_volts: float | None,
+    shunt_fresh: bool,
+    now_monotonic: float,
+) -> tuple[float | None, bool]:
+    """Watches for the PTC aux voltage silently disappearing from fresh shunt data. Returns the
+    new (aux_absent_since, aux_missing_alarm). Shunt staleness pauses the tracking: it already
+    alarms on its own and says nothing about the Aux input."""
+    if config.ptc is None or aux_voltage_volts is not None:
+        return None, False
+    if not shunt_fresh:
+        return state.aux_absent_since, state.aux_missing_alarm
+    absent_since = state.aux_absent_since if state.aux_absent_since is not None else now_monotonic
+    return absent_since, now_monotonic - absent_since > PTC_AUX_MISSING_ALARM_SECONDS
 
 
 def _temperature_spread_celsius(packs: Sequence[BatterySnapshot]) -> float | None:

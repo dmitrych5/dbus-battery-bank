@@ -184,6 +184,27 @@ class TestProtectionsIntegration:
         assert events == ()
 
 
+class TestPtcAuxMissing:
+    def test_missing_aux_in_fresh_shunt_data_warns_after_grace_with_edge_events(self):
+        def no_aux(taken_at):
+            return BankInputs(packs=make_packs(taken_at=taken_at), shunt=make_shunt(taken_at=taken_at, aux_voltage_volts=None))
+
+        state, decision, _ = step_bank(CONFIG, ready_state(), no_aux(1000.0), now_monotonic=1001.0)
+        assert decision.alarms.internal_failure is AlarmSeverity.OK
+        state, decision, events = step_bank(CONFIG, state, no_aux(1650.0), now_monotonic=1651.0)
+        assert decision.alarms.internal_failure is AlarmSeverity.WARNING
+        assert decision.ccl_amps > 0.0
+        assert any("PTC overheat protection is inactive" in event.message for event in events)
+        # The event fires only on the edge; the alarm persists.
+        state, decision, events = step_bank(CONFIG, state, no_aux(1700.0), now_monotonic=1701.0)
+        assert decision.alarms.internal_failure is AlarmSeverity.WARNING
+        assert events == ()
+        recovered = BankInputs(packs=make_packs(taken_at=1750.0), shunt=make_shunt(taken_at=1750.0))
+        _, decision, events = step_bank(CONFIG, state, recovered, now_monotonic=1751.0)
+        assert decision.alarms.internal_failure is AlarmSeverity.OK
+        assert any("PTC aux voltage reporting again" in event.message for event in events)
+
+
 class TestSocReset:
     def test_float_transition_requests_soc_reset_for_every_pack(self):
         full_packs_kwargs = dict(cell_voltages_volts=(3.61,) * 16, soc_percent=97.0)
