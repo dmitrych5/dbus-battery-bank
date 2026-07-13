@@ -10,3 +10,5 @@ mkdir -p /var/log/dbus-battery-bank
 if [ ! -e /service/dbus-battery-bank ]; then
     ln -s "$APP_DIR/service" /service/dbus-battery-bank
 fi
+
+bash "$APP_DIR/custom-gui-install.sh"
