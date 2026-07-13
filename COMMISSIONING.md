@@ -21,7 +21,8 @@ the switch permanent; no rollback rehearsal.
 
 ## Prepare (old stack still running)
 
-- [ ] Copy the repository to the Cerbo: `rsync -r --exclude .venv --exclude .git . root@<cerbo>:/data/apps/dbus-battery-bank/`
+- [ ] Copy the repository to the Cerbo: the rsync from `scripts/deploy.sh` (the script itself
+      is for updating an installed system — its enable/restart steps assume `install.sh` ran)
 - [ ] Create `config.ini` from `config.example.ini`; port the deployed values from
       `dbus-battery-configs` (they are the example's baseline already) and set the real
       serial device paths in `[battery_port:...]` and `[shunt]`.

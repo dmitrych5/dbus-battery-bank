@@ -9,10 +9,8 @@ Building the custom browser GUI (WASM) is documented in [scripts/README.md](scri
 ## Operations
 
 ```sh
-# deploy (exclude build/ — it holds the ~4 GB WASM toolchain; the WASM bundle ships separately)
-rsync -arz -e "ssh -i ~/.ssh/id_ed25519_cerbo" --exclude .git --exclude .venv --exclude build     --exclude __pycache__ --exclude .pytest_cache ./ root@<cerbo>:/data/apps/dbus-battery-bank/
-rsync -az -e "ssh -i ~/.ssh/id_ed25519_cerbo" build/wasm/venus-webassembly.zip root@<cerbo>:/data/apps/dbus-battery-bank/wasm/
-ssh root@<cerbo> 'bash /data/apps/dbus-battery-bank/enable.sh'
+# deploy: tests, code + QML sync, WASM bundle (when built), GUI install, service restart
+scripts/deploy.sh root@<cerbo-ip>
 
 svc -t /service/dbus-battery-bank    # restart
 svc -d /service/dbus-battery-bank    # stop
@@ -25,5 +23,5 @@ tail -f /var/log/dbus-battery-bank/current | tai64nlocal
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install pytest
-.venv/bin/pytest
+.venv/bin/python -m pytest    # -m puts the repository root on sys.path
 ```

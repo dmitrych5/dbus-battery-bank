@@ -55,7 +55,8 @@ new branch's files and adjust the version directory and anchor.
 
 ## Deploy and verify
 
-The zip ships with the normal app deploy (rsync includes `build/`); on the device,
+The zip ships with the normal app deploy (`scripts/deploy.sh` sends it whenever
+`build/wasm/venus-webassembly.zip` exists); on the device,
 `custom-gui-install.sh` (run by `enable.sh`, also on every boot) installs it into
 `/var/www/venus/gui-v2` through the overlay-fs overlay, guarded by a zip-hash marker, and
 regenerates the gzip and hash files the VRM portal check expects.

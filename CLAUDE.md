@@ -48,6 +48,28 @@ interface so other battery types could be added later — only where that costs 
 ## Workflow
 
 - Commit right after every reasonably distinct change, as long as tests pass.
+- Run tests as `.venv/bin/python -m pytest` (the `-m` form puts the repository root on
+  `sys.path`; the bare `pytest` binary cannot import `battery_bank`).
+
+## Deployment
+
+The Cerbo is **production**; be deliberate about every change there. Its address and ssh key
+are kept out of the repository (Claude: see memory).
+
+- `scripts/deploy.sh root@<cerbo-ip>` is the whole procedure for every kind of change: it runs
+  the tests, rsyncs the working tree to `/data/apps/dbus-battery-bank/`, ships
+  `build/wasm/venus-webassembly.zip` when present, then runs `enable.sh` on the device (which
+  installs QML/WASM only if content changed and restarts the GUI accordingly) and restarts the
+  service with `svc -t`. A WASM change only adds the local rebuild beforehand
+  (`scripts/build-wasm-macos.sh`, see `scripts/README.md`) — the deploy itself is unchanged.
+- The rsync must never use `--delete`: the device directory holds files that exist only there —
+  `config.ini`, `state.json` (written by the running service), `wasm/venus-webassembly.zip`,
+  and the old stack's files moved into `old-stack-backup/` by `install.sh`. The flip side:
+  files deleted from the repository linger on the device until removed by hand.
+- Service restarts are safe by design (startup warmup publishes nothing until the picture is
+  complete), but after any deploy watch
+  `tail -f /var/log/dbus-battery-bank/current | tai64nlocal` until the services come back up.
+- First-time installation on a device is `install.sh` (see `COMMISSIONING.md`), not deploy.
 
 ## Code quality standards
 
