@@ -111,6 +111,25 @@ def restore_control_state(persisted: PersistedState, config: Config, now_monoton
     return ControlState(charge_stage=charge_stage, protections=ProtectionState(tripped=persisted.tripped, thermal=thermal))
 
 
+def _validated_number(name: str, value: object, optional: bool = False) -> float | None:
+    """Wrong-typed values must fail here, where the corrupt file is quarantined — not cycles
+    later inside the control core, which would crash-loop on the same file forever."""
+    if value is None and optional:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number: got {value!r}")
+    return value
+
+
+def _validated_thermal(data: object) -> PersistedThermalState | None:
+    if data is None:
+        return None
+    thermal = PersistedThermalState(**data)
+    for name in ("value_estimate", "rate_estimate", "updates_count", "saved_at_wall_seconds"):
+        _validated_number(f"thermal.{name}", getattr(thermal, name))
+    return thermal
+
+
 class StateFile:
     def __init__(self, path: Path):
         self._path = path
@@ -133,8 +152,8 @@ class StateFile:
             state = PersistedState(
                 tripped=frozenset(TripKind[name] for name in data["tripped"]),
                 charge_stage=ChargeStage[data["charge_stage"]],
-                cvl_volts=data["cvl_volts"],
-                thermal=PersistedThermalState(**data["thermal"]) if data.get("thermal") is not None else None,
+                cvl_volts=_validated_number("cvl_volts", data["cvl_volts"], optional=True),
+                thermal=_validated_thermal(data.get("thermal")),
             )
         except (ValueError, KeyError, TypeError) as error:
             quarantine_path = self._path.with_suffix(self._path.suffix + ".corrupt")

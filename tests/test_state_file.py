@@ -59,6 +59,23 @@ class TestStateFile:
         with pytest.raises(StateFileError):
             StateFile(path).load()
 
+    def test_wrong_typed_cvl_is_corrupt_not_a_later_crash(self, tmp_path):
+        path = tmp_path / "state.json"
+        path.write_text('{"version": 1, "tripped": [], "charge_stage": "BULK", "cvl_volts": "56.0"}')
+        with pytest.raises(StateFileError, match="cvl_volts"):
+            StateFile(path).load()
+        assert (tmp_path / "state.json.corrupt").exists()
+
+    def test_wrong_typed_thermal_field_is_corrupt(self, tmp_path):
+        path = tmp_path / "state.json"
+        path.write_text(
+            '{"version": 1, "tripped": [], "charge_stage": "BULK", "cvl_volts": null,'
+            ' "thermal": {"value_estimate": "hot", "rate_estimate": 0, "updates_count": 1, "saved_at_wall_seconds": 0}}'
+        )
+        with pytest.raises(StateFileError, match="value_estimate"):
+            StateFile(path).load()
+        assert (tmp_path / "state.json.corrupt").exists()
+
 
 class TestRestore:
     def test_trips_survive_a_restart_and_keep_limits_at_zero(self):
