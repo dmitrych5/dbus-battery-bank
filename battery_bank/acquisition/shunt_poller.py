@@ -2,6 +2,7 @@
 measurements before any D-Bus processing by Venus OS. Direct reading gives higher current
 resolution than the shunt's D-Bus service (1 mA as sent over the wire)."""
 
+import dataclasses
 import logging
 import time
 from typing import Protocol
@@ -43,13 +44,7 @@ class ShuntPoller:
         for frame in self._parser.feed(self._link.read_available()):
             totals = parse_history_totals(frame)
             if totals is not None:
-                self._history_totals = ShuntHistoryTotals(
-                    charged_energy_kwh=totals.charged_energy_kwh,
-                    discharged_energy_kwh=totals.discharged_energy_kwh,
-                    total_ah_drawn_ah=totals.total_ah_drawn_ah,
-                    full_discharge_count=totals.full_discharge_count,
-                    automatic_sync_count=totals.automatic_sync_count,
-                )
+                self._history_totals = ShuntHistoryTotals(**dataclasses.asdict(totals))
             reading = parse_shunt_reading(frame)
             if reading is not None:
                 self._latest = ShuntSnapshot(

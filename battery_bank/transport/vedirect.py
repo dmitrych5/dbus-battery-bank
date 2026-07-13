@@ -20,13 +20,23 @@ FIELD_SOC_PERMILLE = "SOC"
 FIELD_CONSUMED_MILLIAMP_HOURS = "CE"
 FIELD_AUX_VOLTAGE_MILLIVOLTS = "VS"
 """The shunt reports its Aux input here when the input is configured as starter battery."""
-FIELD_FULL_DISCHARGE_COUNT = "H5"
-FIELD_TOTAL_DRAWN_MILLIAMP_HOURS = "H6"
-FIELD_AUTOMATIC_SYNC_COUNT = "H10"
-FIELD_DISCHARGED_ENERGY_10WH = "H17"
-FIELD_CHARGED_ENERGY_10WH = "H18"
-"""Lifetime counters, sent in the device's alternating history frame — a separate frame from
-the measurements, which is why they parse into their own value."""
+
+_HISTORY_TOTALS_FIELDS = (
+    # (HistoryTotals attribute, VE.Direct field, divisor to display units)
+    ("deepest_discharge_ah", "H1", 1000.0),
+    ("last_discharge_ah", "H2", 1000.0),
+    ("average_discharge_ah", "H3", 1000.0),
+    ("charge_cycles", "H4", 1.0),
+    ("full_discharge_count", "H5", 1.0),
+    ("total_ah_drawn_ah", "H6", 1000.0),
+    ("minimum_voltage_volts", "H7", 1000.0),
+    ("maximum_voltage_volts", "H8", 1000.0),
+    ("automatic_sync_count", "H10", 1.0),
+    ("discharged_energy_kwh", "H17", 100.0),
+    ("charged_energy_kwh", "H18", 100.0),
+)
+"""The device's lifetime history, sent in the alternating history frame — a separate frame
+from the measurements, which is why it parses into its own value."""
 
 
 @dataclass(frozen=True)
@@ -46,14 +56,20 @@ class ShuntReading:
 
 @dataclass(frozen=True)
 class HistoryTotals:
-    """The device's lifetime counters, converted to display units; drawn Ah as a positive
-    magnitude (the wire value is negative per the device convention)."""
+    """The device's lifetime history in display units, keeping the device sign conventions
+    (discharge Ah quantities are negative)."""
 
-    charged_energy_kwh: float
-    discharged_energy_kwh: float
-    total_ah_drawn_ah: float
+    deepest_discharge_ah: float
+    last_discharge_ah: float
+    average_discharge_ah: float
+    charge_cycles: int
     full_discharge_count: int
+    total_ah_drawn_ah: float
+    minimum_voltage_volts: float
+    maximum_voltage_volts: float
     automatic_sync_count: int
+    discharged_energy_kwh: float
+    charged_energy_kwh: float
 
 
 class VeDirectParser:
@@ -112,24 +128,15 @@ def parse_shunt_reading(frame: VeDirectFrame) -> ShuntReading | None:
 
 
 def parse_history_totals(frame: VeDirectFrame) -> HistoryTotals | None:
-    """Extracts the lifetime counters from a history frame; None when the frame is invalid or
+    """Extracts the lifetime history from a history frame; None when the frame is invalid or
     is not the history frame."""
     if not frame.checksum_valid:
         return None
-    charged_kwh = _scaled_int_field(frame, FIELD_CHARGED_ENERGY_10WH, 100.0)
-    discharged_kwh = _scaled_int_field(frame, FIELD_DISCHARGED_ENERGY_10WH, 100.0)
-    drawn_ah = _scaled_int_field(frame, FIELD_TOTAL_DRAWN_MILLIAMP_HOURS, 1000.0)
-    full_discharges = _scaled_int_field(frame, FIELD_FULL_DISCHARGE_COUNT, 1.0)
-    syncs = _scaled_int_field(frame, FIELD_AUTOMATIC_SYNC_COUNT, 1.0)
-    if None in (charged_kwh, discharged_kwh, drawn_ah, full_discharges, syncs):
+    values = {name: _scaled_int_field(frame, field, divisor) for name, field, divisor in _HISTORY_TOTALS_FIELDS}
+    if None in values.values():
         return None
-    return HistoryTotals(
-        charged_energy_kwh=charged_kwh,
-        discharged_energy_kwh=discharged_kwh,
-        total_ah_drawn_ah=abs(drawn_ah),
-        full_discharge_count=int(full_discharges),
-        automatic_sync_count=int(syncs),
-    )
+    counts = {name for name, _, divisor in _HISTORY_TOTALS_FIELDS if divisor == 1.0}
+    return HistoryTotals(**{name: int(value) if name in counts else value for name, value in values.items()})
 
 
 def _scaled_int_field(frame: VeDirectFrame, field: str, divisor: float) -> float | None:

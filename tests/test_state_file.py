@@ -116,18 +116,18 @@ class TestRestore:
 
     def test_to_persisted_round_trips_through_control_state(self):
         state, _, _ = step_bank(CONFIG, ControlState(), healthy_inputs(), now_monotonic=1001.0)
-        persisted = to_persisted(state, HistoryValues(), now_wall_seconds=5000.0)
+        persisted = to_persisted(state, HistoryValues(), {}, now_wall_seconds=5000.0)
         assert persisted.charge_stage is ChargeStage.BULK
         assert persisted.cvl_volts == pytest.approx(57.6)
         assert persisted.tripped == frozenset()
 
     def test_cvl_persists_floored_to_the_quantum(self):
         state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=55.749))
-        assert to_persisted(state, HistoryValues(), now_wall_seconds=0.0).cvl_volts == pytest.approx(55.70)
+        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(55.70)
 
     def test_cvl_exactly_on_a_quantum_is_not_floored_down(self):
         state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=57.6))
-        assert to_persisted(state, HistoryValues(), now_wall_seconds=0.0).cvl_volts == pytest.approx(57.6)
+        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(57.6)
 
     def test_cvl_ramp_within_one_quantum_does_not_rewrite_the_file(self, tmp_path):
         """The float-transition ramp changes the CVL every control cycle; flash writes must be
@@ -137,10 +137,10 @@ class TestRestore:
             return ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=cvl))
 
         store = StateFile(tmp_path / "state.json")
-        assert store.save(to_persisted(state_at(55.749), HistoryValues(), now_wall_seconds=0.0)) is True
-        assert store.save(to_persisted(state_at(55.748), HistoryValues(), now_wall_seconds=1.0)) is False
-        assert store.save(to_persisted(state_at(55.701), HistoryValues(), now_wall_seconds=2.0)) is False
-        assert store.save(to_persisted(state_at(55.699), HistoryValues(), now_wall_seconds=3.0)) is True
+        assert store.save(to_persisted(state_at(55.749), HistoryValues(), {}, now_wall_seconds=0.0)) is True
+        assert store.save(to_persisted(state_at(55.748), HistoryValues(), {}, now_wall_seconds=1.0)) is False
+        assert store.save(to_persisted(state_at(55.701), HistoryValues(), {}, now_wall_seconds=2.0)) is False
+        assert store.save(to_persisted(state_at(55.699), HistoryValues(), {}, now_wall_seconds=3.0)) is True
 
 
 class TestThermalRestore:
@@ -177,10 +177,10 @@ class TestThermalRestore:
 
     def test_to_persisted_snapshots_a_warmed_filter(self):
         state, _, _ = step_bank(CONFIG, ControlState(), healthy_inputs(), now_monotonic=1001.0)
-        persisted = to_persisted(state, HistoryValues(), now_wall_seconds=5000.0)
+        persisted = to_persisted(state, HistoryValues(), {}, now_wall_seconds=5000.0)
         assert persisted.thermal is not None
         assert persisted.thermal.updates_count == 1
         assert persisted.thermal.saved_at_wall_seconds == 5000.0
 
     def test_to_persisted_omits_a_cold_filter(self):
-        assert to_persisted(ControlState(), HistoryValues(), now_wall_seconds=5000.0).thermal is None
+        assert to_persisted(ControlState(), HistoryValues(), {}, now_wall_seconds=5000.0).thermal is None

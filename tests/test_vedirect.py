@@ -3,7 +3,20 @@ import pytest
 from battery_bank.transport.vedirect import VeDirectParser, parse_history_totals, parse_shunt_reading
 
 SHUNT_FIELDS = {"V": "53000", "I": "-5000", "SOC": "825", "CE": "-17500", "VS": "777"}
-HISTORY_FIELDS = {"H1": "-80000", "H5": "1", "H6": "-52000000", "H10": "250", "H17": "140000", "H18": "150000", "PID": "0xA389"}
+HISTORY_FIELDS = {
+    "H1": "-120000",
+    "H2": "-80000",
+    "H3": "-70000",
+    "H4": "45",
+    "H5": "1",
+    "H6": "-52000000",
+    "H7": "47500",
+    "H8": "56100",
+    "H10": "250",
+    "H17": "140000",
+    "H18": "150000",
+    "PID": "0xA389",
+}
 """The device alternates between the measurement frame and this history frame."""
 
 
@@ -90,11 +103,21 @@ class TestParseHistoryTotals:
 
     def test_extracts_lifetime_totals_from_the_history_frame(self):
         totals = parse_history_totals(self.valid_frame(HISTORY_FIELDS))
-        assert totals.charged_energy_kwh == pytest.approx(1500.0)
-        assert totals.discharged_energy_kwh == pytest.approx(1400.0)
-        assert totals.total_ah_drawn_ah == pytest.approx(52_000.0)
+        assert totals.deepest_discharge_ah == pytest.approx(-120.0)
+        assert totals.last_discharge_ah == pytest.approx(-80.0)
+        assert totals.average_discharge_ah == pytest.approx(-70.0)
+        assert totals.charge_cycles == 45
         assert totals.full_discharge_count == 1
+        assert totals.total_ah_drawn_ah == pytest.approx(-52_000.0)
+        assert totals.minimum_voltage_volts == pytest.approx(47.5)
+        assert totals.maximum_voltage_volts == pytest.approx(56.1)
         assert totals.automatic_sync_count == 250
+        assert totals.discharged_energy_kwh == pytest.approx(1400.0)
+        assert totals.charged_energy_kwh == pytest.approx(1500.0)
+
+    def test_partial_history_frame_yields_no_totals(self):
+        fields = {key: value for key, value in HISTORY_FIELDS.items() if key != "H4"}
+        assert parse_history_totals(self.valid_frame(fields)) is None
 
     def test_measurement_frame_yields_no_totals(self):
         assert parse_history_totals(self.valid_frame(SHUNT_FIELDS)) is None

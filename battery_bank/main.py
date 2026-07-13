@@ -23,13 +23,18 @@ from battery_bank.acquisition.shunt_poller import SHUNT_BAUD_RATE, SHUNT_SERIAL_
 from battery_bank.acquisition.snapshots import PackInfo
 from battery_bank.config import Config, ConfigError, load_config
 from battery_bank.core.bank import BankDecision, BankInputs, ControlState, EventSeverity, step_bank
-from battery_bank.core.history import HistoryState, clear_history, step_history
+from battery_bank.core.history import HistoryState, bank_history_sample, clear_history, pack_history_sample, step_history
 from battery_bank.core.protections import reset_trips
 from battery_bank.core.values import BatterySnapshot
 from battery_bank.persistence.state_file import PersistedState, StateFile, StateFileError, restore_control_state, to_persisted
 from battery_bank.publishing import dbus_services
 from battery_bank.publishing.diagnostics_text import diagnostics_values
-from battery_bank.publishing.service_values import aggregate_service_values, history_service_values, pack_service_values
+from battery_bank.publishing.service_values import (
+    aggregate_service_values,
+    history_service_values,
+    pack_history_service_values,
+    pack_service_values,
+)
 from battery_bank.transport.serial_link import SerialLink
 
 logger = logging.getLogger("battery_bank")
@@ -41,9 +46,10 @@ THERMAL_SAVE_INTERVAL_SECONDS = 2 * 3600.0
 """How often the PTC thermal filter state is worth a flash write; must stay comfortably below
 THERMAL_RESTORE_MAX_AGE_SECONDS."""
 HISTORY_SAVE_INTERVAL_SECONDS = 30 * 60.0
-"""The history's energy integrals grow every cycle, so a fresh snapshot reaches the flash only
-this often; a crash loses at most this much accumulation, and a clean shutdown saves the final
-values regardless."""
+"""History extremes can advance every cycle while a new record is being set (a first charge
+after a clear ratchets the maximum cell voltage for hours), so a fresh history snapshot
+reaches the flash only this often; a crash loses at most this much accumulation, and a clean
+shutdown saves the final values regardless."""
 MAX_CONSECUTIVE_CYCLE_FAILURES = 30
 CYCLE_FAILURES_BEFORE_ALARM = 5
 SOC_RESET_PERCENT = 100.0
@@ -103,7 +109,8 @@ class BatteryBankService:
             persisted = PersistedState()
         self._written_thermal = persisted.thermal
         self._history = HistoryState(values=persisted.history)
-        self._written_history = persisted.history
+        self._pack_history = {unique_id: HistoryState(values=values) for unique_id, values in persisted.pack_history.items()}
+        self._written_history = (persisted.history, persisted.pack_history)
         self._history_written_at_wall = time.time()
         return restore_control_state(persisted, self._config, time.monotonic(), time.time())
 
@@ -141,7 +148,13 @@ class BatteryBankService:
 
         inputs = BankInputs(packs=tuple(self._snapshots.values()), shunt=shunt)
         self._state, decision, events = step_bank(self._config, self._state, inputs, time.monotonic())
-        self._history = step_history(self._history, decision, inputs.packs, inputs.shunt, time.time())
+        now_wall = time.time()
+        self._history = step_history(self._history, bank_history_sample(decision, inputs.packs), now_wall)
+        for snapshot in inputs.packs:
+            unique_id = snapshot.identity.unique_id
+            self._pack_history[unique_id] = step_history(
+                self._pack_history.get(unique_id, HistoryState()), pack_history_sample(snapshot), now_wall
+            )
         for event in events:
             logger.log(EVENT_LOG_LEVELS[event.severity], event.message)
         for unique_id in decision.request_soc_reset_pack_ids:
@@ -153,7 +166,14 @@ class BatteryBankService:
     def _aggregate_values(self, decision: BankDecision, inputs: BankInputs) -> dict[str, object]:
         values = aggregate_service_values(self._config, decision, inputs.packs, inputs.shunt, self._service_internal_alarm)
         values.update(diagnostics_values(self._config, self._state, decision, inputs.packs, inputs.shunt, time.monotonic()))
-        values.update(history_service_values(self._history.values, time.time()))
+        shunt_totals = inputs.shunt.history_totals if inputs.shunt is not None else None
+        values.update(history_service_values(self._history.values, shunt_totals, time.time()))
+        return values
+
+    def _pack_values(self, decision: BankDecision, snapshot: BatterySnapshot) -> dict[str, object]:
+        values = pack_service_values(self._config, decision, snapshot)
+        pack_history = self._pack_history.get(snapshot.identity.unique_id, HistoryState())
+        values.update(pack_history_service_values(pack_history.values))
         return values
 
     def _publish(self, decision: BankDecision, inputs: BankInputs) -> None:
@@ -183,7 +203,7 @@ class BatteryBankService:
         for unique_id, service in self._pack_services.items():
             snapshot = self._snapshots.get(unique_id)
             if snapshot is not None:
-                service.update(pack_service_values(self._config, decision, snapshot))
+                service.update(self._pack_values(decision, snapshot))
 
     def _ensure_pack_service(self, snapshot: BatterySnapshot, decision: BankDecision) -> None:
         unique_id = snapshot.identity.unique_id
@@ -199,8 +219,11 @@ class BatteryBankService:
             product_name="JBD UP16S",
             hardware_version=info.hardware_description if info is not None else None,
             serial=unique_id,
-            initial_values=pack_service_values(self._config, decision, snapshot),
-            writable_paths={"/Settings/ResetSocTo": lambda path, value, uid=unique_id: self._request_soc_reset(uid, value)},
+            initial_values=self._pack_values(decision, snapshot),
+            writable_paths={
+                "/Settings/ResetSocTo": lambda path, value, uid=unique_id: self._request_soc_reset(uid, value),
+                "/History/Clear": lambda path, value, uid=unique_id: self._clear_pack_history_callback(uid, value),
+            },
             settings=settings,
         )
 
@@ -223,15 +246,24 @@ class BatteryBankService:
     def _clear_history_callback(self, path: str, value) -> bool:
         if not value:
             return False
-        logger.warning("Operator cleared history")
+        logger.warning("Operator cleared the bank's driver-computed history")
         self._history = clear_history(self._history)
         # Saved immediately: an operator action must not be resurrected by a crash.
         self._persist(fresh_history_due=True)
         return True
 
+    def _clear_pack_history_callback(self, unique_id: str, value) -> bool:
+        if not value:
+            return False
+        logger.warning("Operator cleared the driver-computed history of pack %s", unique_id)
+        self._pack_history[unique_id] = clear_history(self._pack_history.get(unique_id, HistoryState()))
+        self._persist(fresh_history_due=True)
+        return True
+
     def _persist(self, fresh_history_due: bool = False) -> None:
         now_wall = time.time()
-        persisted = to_persisted(self._state, self._history.values, now_wall)
+        pack_history_values = {unique_id: state.values for unique_id, state in self._pack_history.items()}
+        persisted = to_persisted(self._state, self._history.values, pack_history_values, now_wall)
         # The thermal filter changes every sample and the history's integrals every cycle;
         # rewriting them more often than their save cadences would wear the flash without a
         # matching benefit. Between refreshes the last-written copies keep the file stable.
@@ -243,10 +275,11 @@ class BatteryBankService:
             persisted = dataclasses.replace(persisted, thermal=self._written_thermal)
         fresh_history_due = fresh_history_due or now_wall - self._history_written_at_wall >= HISTORY_SAVE_INTERVAL_SECONDS
         if not fresh_history_due:
-            persisted = dataclasses.replace(persisted, history=self._written_history)
+            held_history, held_pack_history = self._written_history
+            persisted = dataclasses.replace(persisted, history=held_history, pack_history=held_pack_history)
         if self._state_file.save(persisted):
             self._written_thermal = persisted.thermal
-            self._written_history = persisted.history
+            self._written_history = (persisted.history, persisted.pack_history)
             if fresh_history_due:
                 self._history_written_at_wall = now_wall
 

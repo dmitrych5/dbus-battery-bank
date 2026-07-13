@@ -15,7 +15,7 @@ device's flash.
 import json
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from battery_bank.config import Config
@@ -59,18 +59,23 @@ class PersistedState:
     cvl_volts: float | None = None
     thermal: PersistedThermalState | None = None
     history: HistoryValues = HistoryValues()
-    """The history's continuously-growing values (energies, running cycle depth) would change
-    the file every control cycle, so the main loop cadence-limits how often a fresh snapshot
-    is handed in — the same treatment as the thermal filter."""
+    """The bank's driver-computed history. The main loop cadence-limits how often a fresh
+    snapshot is handed in — the same treatment as the thermal filter."""
+    pack_history: dict[str, HistoryValues] = field(default_factory=dict)
+    """Per-pack driver-computed history, keyed by the pack's unique id; held to the same
+    cadence as the bank history."""
 
 
-def to_persisted(state: ControlState, history: HistoryValues, now_wall_seconds: float) -> PersistedState:
+def to_persisted(
+    state: ControlState, history: HistoryValues, pack_history: dict[str, HistoryValues], now_wall_seconds: float
+) -> PersistedState:
     thermal = state.protections.thermal
     return PersistedState(
         tripped=state.protections.tripped,
         charge_stage=state.charge_stage.stage,
         cvl_volts=_quantized_cvl(state.charge_stage.cvl_volts),
         history=history,
+        pack_history=dict(sorted(pack_history.items())),
         thermal=(
             PersistedThermalState(
                 value_estimate=thermal.kalman.value_estimate,
@@ -148,10 +153,27 @@ def _validated_history(data: object) -> HistoryValues:
     if data is None:
         # State files written before history existed.
         return HistoryValues()
-    history = HistoryValues(**data)
+    if not isinstance(data, dict):
+        raise ValueError(f"history must be a mapping: got {data!r}")
+    # Fields dropped by a schema change are ignored rather than treated as corruption:
+    # quarantining the whole file over informational history would discard the safety latches
+    # persisted next to it.
+    history = HistoryValues(**{name: value for name, value in data.items() if name in HISTORY_FIELD_NAMES})
     for name in HISTORY_FIELD_NAMES:
         _validated_number(f"history.{name}", getattr(history, name), optional=name in _HISTORY_OPTIONAL_FIELDS)
     return history
+
+
+def _validated_pack_history(data: object) -> dict[str, HistoryValues]:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"pack_history must be a mapping: got {data!r}")
+    return {unique_id: _validated_history(entry) for unique_id, entry in data.items()}
+
+
+def _history_json(values: HistoryValues) -> dict[str, object]:
+    return {name: getattr(values, name) for name in HISTORY_FIELD_NAMES}
 
 
 class StateFile:
@@ -179,6 +201,7 @@ class StateFile:
                 cvl_volts=_validated_number("cvl_volts", data["cvl_volts"], optional=True),
                 thermal=_validated_thermal(data.get("thermal")),
                 history=_validated_history(data.get("history")),
+                pack_history=_validated_pack_history(data.get("pack_history")),
             )
         except (ValueError, KeyError, TypeError) as error:
             quarantine_path = self._path.with_suffix(self._path.suffix + ".corrupt")
@@ -196,7 +219,8 @@ class StateFile:
                 "charge_stage": state.charge_stage.name,
                 "cvl_volts": state.cvl_volts,
                 "thermal": vars(state.thermal) if state.thermal is not None else None,
-                "history": {name: getattr(state.history, name) for name in HISTORY_FIELD_NAMES},
+                "history": _history_json(state.history),
+                "pack_history": {unique_id: _history_json(values) for unique_id, values in state.pack_history.items()},
             }
         )
         if serialized == self._last_saved:

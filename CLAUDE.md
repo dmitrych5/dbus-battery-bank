@@ -209,7 +209,7 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   `/opt/victronenergy/gui-v2`), and the GUI-v2 browser WASM at `http://<gx>/gui-v2/` — a
   compiled bundle that QML files cannot patch. **The operator's primary UI is the browser
   WASM.**
-- GUI-v2 QML pages: the project ships its own copies of the five battery QML pages
+- GUI-v2 QML pages: the project ships its own copies of the six battery QML pages
   (per-Venus-version sets under `qml/gui-v2/`; the 3.6x set serves firmware ≤ v3.69, 3.7x
   serves ≤ v3.79), installed over the stock ones via the overlay-fs app by
   `custom-gui-install.sh`, which `enable.sh` runs on every boot so Cerbo firmware upgrades
@@ -224,7 +224,7 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   aggregate). It keeps working with this project's services (same ProductIds and paths) and
   survives firmware upgrades via the overlay — but it is now frozen, since the old driver's
   update mechanism no longer runs. Future task: build this project's own WASM (mr-manuel's
-  venus-os_dbus-serialbattery_gui-v2 build pipeline, with our two changed pages) so the
+  venus-os_dbus-serialbattery_gui-v2 build pipeline, with our changed pages) so the
   trip-reset control reaches the browser and the WASM tracks firmware versions again; until
   then, check that the WASM still works after each firmware upgrade.
 - The Ambient tile substitution in the Temperatures row was dropped: the native "Air
@@ -232,23 +232,24 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
   bank-level, so per-pack float/bulk state has no meaning; the aggregate carries the full
   diagnostics.
-- Calculated history: a pure accumulator (`core/history.py`) fed once per cycle from the bank
-  decision publishes the aggregate's `/History/*` — lifetime min/max voltage, cell voltage and
-  temperature, low/high voltage alarm counts (rising edges of the aggregated pack+cell alarms),
-  deepest/last/average discharge, charged/discharged energy, cumulative Ah drawn, full
-  discharges, synchronization count, and time since last full charge — plus `/History/Clear`
-  (writable; any non-zero value clears everything) and `/History/CanBeCleared = 1`. The
-  energies, Ah drawn, full-discharge and sync counts come from the shunt's own lifetime
-  counters (VE.Direct H17/H18/H6/H5/H10, carried from the alternating history frame into every
-  `ShuntSnapshot`): the shunt accumulates internally and keeps counting while the service is
-  down; a clear rebases them against persisted baselines, and totals dropping below a baseline
-  (shunt replaced/reset) restart that baseline at zero. The shunt's min/max records
-  (H1–H3, H7–H9) are deliberately not used: records cannot be rebased for `/History/Clear`,
-  and the equivalents computed here key off the bank's own full-charge decision. Discharge
-  bookkeeping is cycle-based in the BMV tradition: a cycle runs full charge to full charge
-  (keyed off the decision's FloatTransition entry), where the running cycle depth is finalized
-  as "last discharge" and folded into the average. Depth and counter records only accumulate
-  from shunt-fresh data, because the BMS fallback counts from a different zero.
+- History, split by data source (the GUI groups it with headers; see the shipped
+  `PageBatteryHistory.qml`):
+  - **Shunt-provided** (aggregate only): the SmartShunt's own lifetime history — deepest/last/
+    average discharge, charge cycles, full discharges, cumulative Ah drawn, min/max voltage,
+    sync count, charged/discharged energy (VE.Direct H1–H8, H10, H17, H18, parsed from the
+    alternating history frame into `ShuntSnapshot.history_totals` and published raw). The
+    shunt accumulates these internally, keeps counting while the service is down, and they
+    are reset from the shunt itself (VictronConnect), never from this driver. H9/H11/H12 are
+    deliberately not used: time-since-full-charge keys off the bank's own decision, and the
+    shunt's voltage-alarm counts reflect its private thresholds rather than BMS alarms.
+  - **Driver-provided** (`core/history.py`, one pure accumulator instance for the bank plus
+    one per pack, fed per cycle via `bank_history_sample`/`pack_history_sample`): min/max
+    cell voltage and temperature, low/high voltage alarm counts (rising edges of pack+cell
+    alarm flags), the bank's time since last full charge (stamped at FloatTransition entry),
+    and per-pack min/max voltage (on the aggregate those paths carry the shunt's records
+    instead). Each subject publishes `/History/Clear` (any non-zero write clears that
+    subject's driver history) and `/History/CanBeCleared = 1`; BMS-provided charge cycles and
+    total Ah drawn stay on the pack services.
   `/Settings/HasTemperature = 1` is published because the stock GUI hides the temperature
   history rows without it (and `/Settings/HasStarterVoltage` deliberately stays absent, so the
   repurposed starter-voltage VRM workaround paths never render as GUI rows). BMS-provided

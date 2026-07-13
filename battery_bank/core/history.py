@@ -1,33 +1,34 @@
-"""Lifetime battery history: a pure accumulator fed once per control step from the bank
-decision and the snapshots. It only records — nothing in it feeds back into control.
+"""Driver-computed battery history: a pure accumulator fed once per control step. It only
+records — nothing in it feeds back into control.
 
-Discharge bookkeeping is cycle-based, in the BMV tradition: one cycle runs from full charge to
-full charge (the decision's FloatTransition entry). The running depth of the current cycle is
-the largest consumed-Ah magnitude seen since the last full charge; at the full-charge moment it
-is finalized as the "last discharge" and folded into the average, and the lifetime deepest
-record tracks it continuously. Depths are stored as positive magnitudes; the publishing layer
-negates them per the Victron convention.
+The accumulator runs once per subject: once for the bank (behind the aggregate service's
+"Driver-provided data" history section) and once per pack (the per-pack history only the
+driver can compute, since the shunt sees the bank as a whole). A HistorySample carries the
+per-step observation for one subject; bank_history_sample() and pack_history_sample() build
+it from the bank decision and from one pack snapshot respectively.
 
-Charged/discharged energy, cumulative Ah drawn, full-discharge and synchronization counts come
-from the shunt's own lifetime counters (it accumulates internally and keeps counting while
-this service is down), published relative to baselines that an operator clear moves up to the
-current totals.
+Only what the shunt cannot provide is computed (and persisted) here: voltage and cell-voltage
+extremes, temperature extremes, voltage alarm counts, and the bank's full-charge timestamp
+(keyed to the FloatTransition decision). The rest of the aggregate's history page comes
+straight from the shunt's lifetime counters (ShuntHistoryTotals), which the shunt accumulates
+internally — even while this service is down — and which the operator resets in the shunt
+itself, not here. The bank subject therefore skips voltage extremes (the shunt's H7/H8 own
+those paths on the aggregate), while packs track their own.
 
-Alarm counters count rising edges of the aggregated alarms; an edge tracker of None means "not
-observed yet" (fresh start or restart), so an alarm already active at startup is adopted
-without counting it again.
+Alarm counters count rising edges; an edge tracker of None means "not observed yet" (fresh
+start or restart), so an alarm already active at startup is adopted without counting it again.
 """
 
 from dataclasses import dataclass, fields, replace
 from typing import Sequence
 
 from battery_bank.core.bank import BankDecision
-from battery_bank.core.values import AlarmSeverity, BatterySnapshot, ShuntHistoryTotals, ShuntSnapshot
+from battery_bank.core.values import AlarmSeverity, BatterySnapshot, PackAlarms
 
 
 @dataclass(frozen=True)
 class HistoryValues:
-    """The operator-visible accumulated history; persisted field-for-field."""
+    """The driver-computed history of one subject; persisted field-for-field."""
 
     minimum_voltage_volts: float | None = None
     maximum_voltage_volts: float | None = None
@@ -37,32 +38,8 @@ class HistoryValues:
     maximum_temperature_celsius: float | None = None
     low_voltage_alarm_count: int = 0
     high_voltage_alarm_count: int = 0
-    deepest_discharge_ah: float | None = None
-    last_discharge_ah: float | None = None
-    """Depth of the last completed cycle; the running cycle shows live on /ConsumedAmphours."""
-    cycle_discharge_ah: float = 0.0
-    """Largest consumed-Ah magnitude since the last full charge — the running cycle depth."""
-    discharge_cycle_count: int = 0
-    discharge_cycle_ah_total: float = 0.0
-    charged_energy_kwh: float | None = None
-    discharged_energy_kwh: float | None = None
-    total_ah_drawn_ah: float | None = None
-    full_discharge_count: int | None = None
-    automatic_sync_count: int | None = None
-    """Shunt lifetime counter minus its clear baseline; None until totals have been seen. The
-    names match ShuntHistoryTotals, which is how SHUNT_COUNTER_FIELDS pairs them up."""
-    charged_energy_baseline_kwh: float = 0.0
-    discharged_energy_baseline_kwh: float = 0.0
-    total_ah_drawn_baseline_ah: float = 0.0
-    full_discharge_baseline_count: int = 0
-    automatic_sync_baseline_count: int = 0
     last_full_charge_at_wall_seconds: float | None = None
     """Wall clock, not monotonic: the value must stay meaningful across restarts."""
-
-    def average_discharge_ah(self) -> float | None:
-        if self.discharge_cycle_count == 0:
-            return None
-        return self.discharge_cycle_ah_total / self.discharge_cycle_count
 
 
 HISTORY_FIELD_NAMES = tuple(field.name for field in fields(HistoryValues))
@@ -75,48 +52,61 @@ class HistoryState:
     high_voltage_alarm_active: bool | None = None
 
 
-SHUNT_COUNTER_FIELDS = (
-    ("charged_energy_kwh", "charged_energy_baseline_kwh"),
-    ("discharged_energy_kwh", "discharged_energy_baseline_kwh"),
-    ("total_ah_drawn_ah", "total_ah_drawn_baseline_ah"),
-    ("full_discharge_count", "full_discharge_baseline_count"),
-    ("automatic_sync_count", "automatic_sync_baseline_count"),
-)
-"""(published value, clear baseline) pairs; each value field name doubles as the accessor on
-ShuntHistoryTotals."""
+@dataclass(frozen=True)
+class HistorySample:
+    """One subject's observation for one step; None values leave their records untouched."""
+
+    voltage_volts: float | None
+    minimum_cell_voltage_volts: float | None
+    maximum_cell_voltage_volts: float | None
+    minimum_temperature_celsius: float | None
+    maximum_temperature_celsius: float | None
+    low_voltage_alarm: bool
+    high_voltage_alarm: bool
+    full_charge: bool
+
+
+def bank_history_sample(decision: BankDecision, packs: Sequence[BatterySnapshot]) -> HistorySample:
+    return HistorySample(
+        voltage_volts=None,
+        minimum_cell_voltage_volts=min(pack.min_cell_voltage_volts() for pack in packs) if packs else None,
+        maximum_cell_voltage_volts=max(pack.max_cell_voltage_volts() for pack in packs) if packs else None,
+        minimum_temperature_celsius=min(min(pack.cell_temperatures_celsius) for pack in packs) if packs else None,
+        maximum_temperature_celsius=max(max(pack.cell_temperatures_celsius) for pack in packs) if packs else None,
+        low_voltage_alarm=_voltage_alarm_active(decision.alarms, "low"),
+        high_voltage_alarm=_voltage_alarm_active(decision.alarms, "high"),
+        full_charge=decision.entered_float_transition,
+    )
+
+
+def pack_history_sample(pack: BatterySnapshot) -> HistorySample:
+    """The bank's full-charge moment is deliberately not stamped per pack: the stage machine
+    is bank-level, so a per-pack timestamp would only duplicate the aggregate's."""
+    return HistorySample(
+        voltage_volts=pack.voltage_volts,
+        minimum_cell_voltage_volts=pack.min_cell_voltage_volts(),
+        maximum_cell_voltage_volts=pack.max_cell_voltage_volts(),
+        minimum_temperature_celsius=min(pack.cell_temperatures_celsius),
+        maximum_temperature_celsius=max(pack.cell_temperatures_celsius),
+        low_voltage_alarm=_voltage_alarm_active(pack.alarms, "low"),
+        high_voltage_alarm=_voltage_alarm_active(pack.alarms, "high"),
+        full_charge=False,
+    )
 
 
 def clear_history(state: HistoryState) -> HistoryState:
-    """Resets everything (the GUI's Clear button writes 1); cleared values re-accumulate from
-    the very next step. The shunt's lifetime counters cannot be reset from here, so clearing
-    moves their baselines up to the current totals instead."""
-    values = state.values
-    rebased = {
-        baseline_field: getattr(values, baseline_field) + (getattr(values, value_field) or 0)
-        for value_field, baseline_field in SHUNT_COUNTER_FIELDS
-    }
-    return replace(state, values=HistoryValues(**rebased))
+    """Resets one subject's driver-computed history (the GUI's Clear button); cleared values
+    re-accumulate from the very next step. The shunt-provided history is not affected — it is
+    reset from the shunt itself."""
+    return replace(state, values=HistoryValues())
 
 
-def step_history(
-    state: HistoryState,
-    decision: BankDecision,
-    packs: Sequence[BatterySnapshot],
-    shunt: ShuntSnapshot | None,
-    now_wall_seconds: float,
-) -> HistoryState:
-    values = _track_extremes(state.values, decision, packs)
-    values, low_active = _count_alarm_edge(
-        values, "low_voltage_alarm_count", state.low_voltage_alarm_active, decision.alarms.low_voltage, decision.alarms.low_cell_voltage
-    )
-    values, high_active = _count_alarm_edge(
-        values, "high_voltage_alarm_count", state.high_voltage_alarm_active, decision.alarms.high_voltage, decision.alarms.high_cell_voltage
-    )
-    values = _track_discharge_depth(values, decision)
-    if shunt is not None and shunt.history_totals is not None and decision.shunt_fresh:
-        values = _track_shunt_counters(values, shunt.history_totals)
-    if decision.entered_float_transition:
-        values = _complete_charge_cycle(values, now_wall_seconds)
+def step_history(state: HistoryState, sample: HistorySample, now_wall_seconds: float) -> HistoryState:
+    values = _track_extremes(state.values, sample)
+    values, low_active = _count_alarm_edge(values, "low_voltage_alarm_count", state.low_voltage_alarm_active, sample.low_voltage_alarm)
+    values, high_active = _count_alarm_edge(values, "high_voltage_alarm_count", state.high_voltage_alarm_active, sample.high_voltage_alarm)
+    if sample.full_charge:
+        values = replace(values, last_full_charge_at_wall_seconds=now_wall_seconds)
     return HistoryState(
         values=values,
         low_voltage_alarm_active=low_active,
@@ -124,68 +114,28 @@ def step_history(
     )
 
 
-def _track_extremes(values: HistoryValues, decision: BankDecision, packs: Sequence[BatterySnapshot]) -> HistoryValues:
-    updates: dict[str, float] = {}
-    if decision.voltage_volts is not None:
-        updates["minimum_voltage_volts"] = _lower(values.minimum_voltage_volts, decision.voltage_volts)
-        updates["maximum_voltage_volts"] = _higher(values.maximum_voltage_volts, decision.voltage_volts)
-    if packs:
-        updates["minimum_cell_voltage_volts"] = _lower(values.minimum_cell_voltage_volts, min(pack.min_cell_voltage_volts() for pack in packs))
-        updates["maximum_cell_voltage_volts"] = _higher(values.maximum_cell_voltage_volts, max(pack.max_cell_voltage_volts() for pack in packs))
-        updates["minimum_temperature_celsius"] = _lower(
-            values.minimum_temperature_celsius, min(min(pack.cell_temperatures_celsius) for pack in packs)
-        )
-        updates["maximum_temperature_celsius"] = _higher(
-            values.maximum_temperature_celsius, max(max(pack.cell_temperatures_celsius) for pack in packs)
-        )
+def _track_extremes(values: HistoryValues, sample: HistorySample) -> HistoryValues:
+    extreme_fields = (
+        ("minimum_voltage_volts", sample.voltage_volts, _lower),
+        ("maximum_voltage_volts", sample.voltage_volts, _higher),
+        ("minimum_cell_voltage_volts", sample.minimum_cell_voltage_volts, _lower),
+        ("maximum_cell_voltage_volts", sample.maximum_cell_voltage_volts, _higher),
+        ("minimum_temperature_celsius", sample.minimum_temperature_celsius, _lower),
+        ("maximum_temperature_celsius", sample.maximum_temperature_celsius, _higher),
+    )
+    updates = {name: extreme(getattr(values, name), sample_value) for name, sample_value, extreme in extreme_fields if sample_value is not None}
     return replace(values, **updates) if updates else values
 
 
-def _count_alarm_edge(
-    values: HistoryValues, count_field: str, previously_active: bool | None, *severities: AlarmSeverity
-) -> tuple[HistoryValues, bool]:
-    active = any(severity > AlarmSeverity.OK for severity in severities)
+def _voltage_alarm_active(alarms: PackAlarms, direction: str) -> bool:
+    """Pack-level and cell-level flags share one counter, matching the GUI's single row."""
+    return getattr(alarms, f"{direction}_voltage") > AlarmSeverity.OK or getattr(alarms, f"{direction}_cell_voltage") > AlarmSeverity.OK
+
+
+def _count_alarm_edge(values: HistoryValues, count_field: str, previously_active: bool | None, active: bool) -> tuple[HistoryValues, bool]:
     if active and previously_active is False:
         values = replace(values, **{count_field: getattr(values, count_field) + 1})
     return values, active
-
-
-def _track_discharge_depth(values: HistoryValues, decision: BankDecision) -> HistoryValues:
-    """Only shunt-fresh consumed Ah feeds the depth records: the BMS fallback counts from a
-    different zero, and a momentary source switch must not fake a deeper discharge. (With no
-    shunt configured, shunt_fresh is always True and the BMS values are used consistently.)"""
-    if decision.consumed_ah is None or not decision.shunt_fresh:
-        return values
-    depth_ah = max(0.0, -decision.consumed_ah)
-    return replace(
-        values,
-        cycle_discharge_ah=max(values.cycle_discharge_ah, depth_ah),
-        deepest_discharge_ah=_higher(values.deepest_discharge_ah, depth_ah),
-    )
-
-
-def _track_shunt_counters(values: HistoryValues, totals: ShuntHistoryTotals) -> HistoryValues:
-    updates: dict[str, float | int] = {}
-    for value_field, baseline_field in SHUNT_COUNTER_FIELDS:
-        total = getattr(totals, value_field)
-        baseline = getattr(values, baseline_field)
-        if total < baseline:
-            # The shunt's counters restarted (device replaced or reset): treat it as a new
-            # meter rather than publishing a negative value.
-            baseline = 0
-            updates[baseline_field] = baseline
-        updates[value_field] = total - baseline
-    return replace(values, **updates)
-
-
-def _complete_charge_cycle(values: HistoryValues, now_wall_seconds: float) -> HistoryValues:
-    """The bank reached full charge: stamp it and finalize the running discharge cycle."""
-    updates: dict[str, object] = {"last_full_charge_at_wall_seconds": now_wall_seconds, "cycle_discharge_ah": 0.0}
-    if values.cycle_discharge_ah > 0:
-        updates["last_discharge_ah"] = values.cycle_discharge_ah
-        updates["discharge_cycle_count"] = values.discharge_cycle_count + 1
-        updates["discharge_cycle_ah_total"] = values.discharge_cycle_ah_total + values.cycle_discharge_ah
-    return replace(values, **updates)
 
 
 def _lower(current: float | None, sample: float) -> float:

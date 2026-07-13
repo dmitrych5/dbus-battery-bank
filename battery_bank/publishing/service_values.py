@@ -13,7 +13,7 @@ from battery_bank.core.bank import BankDecision
 from battery_bank.core.current_limits import LimitSource, PackCurrentLimit
 from battery_bank.core.history import HistoryValues
 from battery_bank.core.stats import mean
-from battery_bank.core.values import AlarmSeverity, BatterySnapshot, PackAlarms, ShuntSnapshot
+from battery_bank.core.values import AlarmSeverity, BatterySnapshot, PackAlarms, ShuntHistoryTotals, ShuntSnapshot
 
 ALARM_PATHS = {
     "high_voltage": "/Alarms/HighVoltage",
@@ -126,37 +126,57 @@ def pack_service_values(config: Config, decision: BankDecision, snapshot: Batter
     return values
 
 
-def history_service_values(history: HistoryValues, now_wall_seconds: float) -> dict[str, object]:
-    """The aggregate's /History/* paths — the standard Victron battery-history contract the
-    stock GUI renders. Discharge depths publish negative per the Victron convention;
-    /History/Clear is a command path owned by the main loop, not a value here."""
+def history_service_values(history: HistoryValues, shunt_totals: ShuntHistoryTotals | None, now_wall_seconds: float) -> dict[str, object]:
+    """The aggregate's /History/* paths. Everything the shunt tracks itself publishes straight
+    from its lifetime history (already in the Victron sign convention); the driver-computed
+    values cover what the shunt cannot know. /History/Clear is a command path owned by the
+    main loop, not a value here — it clears only the driver-computed part."""
+
+    def shunt(field_name: str, digits: int | None = None) -> object:
+        value = getattr(shunt_totals, field_name) if shunt_totals is not None else None
+        return _rounded(value, digits) if digits is not None else value
+
     stamp = history.last_full_charge_at_wall_seconds
     return {
-        "/History/DeepestDischarge": _negated_ah(history.deepest_discharge_ah),
-        "/History/LastDischarge": _negated_ah(history.last_discharge_ah),
-        "/History/AverageDischarge": _negated_ah(history.average_discharge_ah()),
+        "/History/DeepestDischarge": shunt("deepest_discharge_ah", 1),
+        "/History/LastDischarge": shunt("last_discharge_ah", 1),
+        "/History/AverageDischarge": shunt("average_discharge_ah", 1),
+        "/History/ChargeCycles": shunt("charge_cycles"),
+        "/History/FullDischarges": shunt("full_discharge_count"),
+        "/History/TotalAhDrawn": shunt("total_ah_drawn_ah", 1),
+        "/History/MinimumVoltage": shunt("minimum_voltage_volts", 2),
+        "/History/MaximumVoltage": shunt("maximum_voltage_volts", 2),
+        "/History/AutomaticSyncs": shunt("automatic_sync_count"),
+        "/History/DischargedEnergy": shunt("discharged_energy_kwh", 2),
+        "/History/ChargedEnergy": shunt("charged_energy_kwh", 2),
+        **_driver_history_values(history),
+        "/History/TimeSinceLastFullCharge": int(now_wall_seconds - stamp) if stamp is not None else None,
+    }
+
+
+def pack_history_service_values(history: HistoryValues) -> dict[str, object]:
+    """One pack's /History/* paths: the driver-computed part plus the pack's own voltage
+    extremes (on the aggregate those paths carry the shunt's records instead). ChargeCycles
+    and TotalAhDrawn stay BMS-provided in pack_service_values."""
+    return {
         "/History/MinimumVoltage": _rounded(history.minimum_voltage_volts, 2),
         "/History/MaximumVoltage": _rounded(history.maximum_voltage_volts, 2),
+        **_driver_history_values(history),
+    }
+
+
+def _driver_history_values(history: HistoryValues) -> dict[str, object]:
+    return {
         "/History/MinimumCellVoltage": _rounded(history.minimum_cell_voltage_volts, 3),
         "/History/MaximumCellVoltage": _rounded(history.maximum_cell_voltage_volts, 3),
         "/History/MinimumTemperature": _rounded(history.minimum_temperature_celsius, 1),
         "/History/MaximumTemperature": _rounded(history.maximum_temperature_celsius, 1),
         "/History/LowVoltageAlarms": history.low_voltage_alarm_count,
         "/History/HighVoltageAlarms": history.high_voltage_alarm_count,
-        "/History/ChargedEnergy": _rounded(history.charged_energy_kwh, 2),
-        "/History/DischargedEnergy": _rounded(history.discharged_energy_kwh, 2),
-        "/History/TotalAhDrawn": _negated_ah(history.total_ah_drawn_ah),
-        "/History/FullDischarges": history.full_discharge_count,
-        "/History/AutomaticSyncs": history.automatic_sync_count,
-        "/History/TimeSinceLastFullCharge": int(now_wall_seconds - stamp) if stamp is not None else None,
         "/History/CanBeCleared": 1,
         # The stock GUI hides the min/max temperature history rows without this flag.
         "/Settings/HasTemperature": 1,
     }
-
-
-def _negated_ah(magnitude_ah: float | None) -> float | None:
-    return -round(magnitude_ah, 1) if magnitude_ah is not None else None
 
 
 def vrm_metric_workarounds(decision: BankDecision, packs: Sequence[BatterySnapshot], shunt: ShuntSnapshot | None) -> dict[str, object]:

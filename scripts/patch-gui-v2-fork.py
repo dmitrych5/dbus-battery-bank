@@ -1,9 +1,10 @@
 """Applies this project's GUI changes to a checkout of mr-manuel's venus-os_gui-v2 fork
 (branch dbus-serialbattery/venus-os_v3.6x/gui-v2_v1.1.x) before the WASM build.
 
-PageBattery.qml is byte-identical between that branch and our qml/gui-v2/3.6x base, so our
-edited copy is dropped in whole. The settings page is newer on the branch (ResetSocToApply),
-so the trip-reset control is inserted instead of replacing the file.
+PageBattery.qml and PageBatteryHistory.qml are dropped in whole (PageBattery is
+byte-identical between that branch and our qml/gui-v2/3.6x base; the history page is this
+project's own layout). The settings page is newer on the branch (ResetSocToApply), so the
+trip-reset control is inserted instead of replacing the file.
 """
 
 import sys
@@ -34,9 +35,9 @@ def main() -> None:
     fork_dir = Path(sys.argv[1])
     pages_dir = fork_dir / PAGES_SUBDIR
 
-    our_page_battery = PROJECT_DIR / "qml/gui-v2/3.6x/PageBattery.qml"
-    (pages_dir / "PageBattery.qml").write_text(our_page_battery.read_text())
-    print("PageBattery.qml replaced with our edited copy")
+    for page_name in ("PageBattery.qml", "PageBatteryHistory.qml"):
+        (pages_dir / page_name).write_text((PROJECT_DIR / "qml/gui-v2/3.6x" / page_name).read_text())
+        print(f"{page_name} replaced with our edited copy")
 
     settings_path = pages_dir / "PageBatteryDbusSerialbatterySettings.qml"
     settings_text = settings_path.read_text()

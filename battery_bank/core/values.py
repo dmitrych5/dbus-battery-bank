@@ -104,15 +104,22 @@ class BatterySnapshot:
 
 @dataclass(frozen=True)
 class ShuntHistoryTotals:
-    """The shunt's own lifetime counters — it accumulates internally and keeps counting while
-    this service is down. Drawn Ah is a positive magnitude. The field names deliberately match
-    the corresponding HistoryValues counters, which pair them up by name."""
+    """The shunt's own lifetime history — it accumulates internally, keeps counting while this
+    service is down, and is reset from the shunt itself (e.g. VictronConnect), never from
+    here. Device sign conventions are kept: discharge Ah quantities are negative. The field
+    names match transport.vedirect.HistoryTotals, which is copied over field-for-field."""
 
-    charged_energy_kwh: float
-    discharged_energy_kwh: float
-    total_ah_drawn_ah: float
+    deepest_discharge_ah: float
+    last_discharge_ah: float
+    average_discharge_ah: float
+    charge_cycles: int
     full_discharge_count: int
+    total_ah_drawn_ah: float
+    minimum_voltage_volts: float
+    maximum_voltage_volts: float
     automatic_sync_count: int
+    discharged_energy_kwh: float
+    charged_energy_kwh: float
 
 
 @dataclass(frozen=True)
