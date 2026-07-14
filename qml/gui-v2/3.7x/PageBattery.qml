@@ -344,7 +344,9 @@ Page {
 								unit: VenusOS.Units_Percentage
 								// Units.getDisplayText clips two-digit values to 1 decimal unless
 								// the requested precision is >= 3, which it maps to exactly 2.
-								precision: 3
+								// Packs get the extra decimal (hi-res BMS SoC, 0.01% steps); the
+								// aggregate SoC is shunt-sourced at 0.1% resolution.
+								precision: root.isBatteryBankPack ? 3 : 2
 								font.pixelSize: 22
 							}
 
