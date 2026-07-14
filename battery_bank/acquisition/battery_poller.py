@@ -21,7 +21,7 @@ from battery_bank.acquisition.snapshots import (
 )
 from battery_bank.config import BatteryPortConfig
 from battery_bank.core.values import BatterySnapshot, PackIdentity
-from battery_bank.transport import up16s
+from battery_bank.transport import up16s, up16s_raw_window
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,9 @@ INTERFERENCE_DELAY_SECONDS = 1.0
 MAX_INTERFERENCE_RETRY_SECONDS = 60.0
 """How much time to wait for interference to end during discovery."""
 MAX_SET_SOC_RETRIES = 3
+RAW_WINDOW_CHUNK_REGISTERS = 0x80
+"""One chunk's 256-byte payload stays near the proven PackStatus response size; the full
+window in a single frame (1 KiB) would flirt with SERIAL_TIMEOUT_SECONDS at 9600 baud."""
 
 
 class Link(Protocol):
@@ -106,7 +109,28 @@ class PackPoller:
             )
             self._identities[address] = PackIdentity(unique_id=unique_id, port=self._port_config.device, address=address)
             logger.info("Discovered pack %s at %s address %d", unique_id, self._port_config.device, address)
+            self._log_raw_window(address)
         return dict(self._infos)
+
+    def _log_raw_window(self, address: int) -> None:
+        """One-shot diagnostic dump of the undocumented raw status window (see
+        transport.up16s_raw_window): logged at discovery so its decode can be validated
+        offline against the proven commands before the window is trusted for anything.
+        A failure only costs the dump; discovery has already succeeded."""
+        registers: list[int] = []
+        for first_register in range(0, up16s_raw_window.WINDOW_REGISTER_COUNT, RAW_WINDOW_CHUNK_REGISTERS):
+            count = min(RAW_WINDOW_CHUNK_REGISTERS, up16s_raw_window.WINDOW_REGISTER_COUNT - first_register)
+            request = up16s_raw_window.build_window_request(address, first_register, count)
+            chunk = self._exchange(address, up16s_raw_window.RawWindow, request)
+            if chunk is None:
+                logger.warning("Battery %d: no answer for raw window registers 0x%03X-0x%03X", address, first_register, first_register + count - 1)
+                break
+            registers.extend(chunk.registers)
+            if len(chunk.registers) != count:
+                logger.warning("Battery %d: raw window returned %d registers instead of %d from 0x%03X", address, len(chunk.registers), count, first_register)
+                break
+        if registers:
+            logger.info("Battery %d raw status window (%d registers):\n%s", address, len(registers), up16s_raw_window.describe_window(registers))
 
     def poll(self) -> list[BatterySnapshot]:
         """One pass over the discovered packs. A pack that fails to answer simply yields no
@@ -180,7 +204,9 @@ class PackPoller:
             logger.error("Couldn't set SOC on battery %d", address)
 
     def _send(self, address: int, command: type[up16s.CommandT], payload: bytes = b"") -> up16s.CommandT | None:
-        request = up16s.build_request(address, command, payload)
+        return self._exchange(address, command, up16s.build_request(address, command, payload))
+
+    def _exchange(self, address: int, command: type[up16s.CommandT], request: bytes) -> up16s.CommandT | None:
         response = self._link.request(request, up16s.RESPONSE_PAYLOAD_LENGTH_OFFSET, RESPONSE_OVERHEAD_LENGTH)
         if response is None:
             return None

@@ -384,6 +384,14 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
   capacity in identity fallbacks because full capacity gets recalculated by the BMS.
 - PackStatus carries `ambient_temp` — used for ambient-temperature current limiting and UI.
 - Auto SoC reset at charge completion is only effective with certain cabling configurations.
+- An **undocumented raw status window** (0x78 at 0x3000+, see `docs/up16s-raw-window.md`)
+  reads the BMS status array directly and bypasses the master's ~50 s cache of slave state —
+  the only known way to get fresh slave data every cycle. It is UNTRUSTED until validated
+  against the proven commands (the docs file records the validation strategy); its encodings
+  differ from the serialized commands for the same quantities (current offset 30000, not
+  300000; 0xF6 is deci-Kelvin), and the protection/warning bitmasks are NOT in the window.
+  Currently only dumped to the log once per pack at discovery
+  (`transport/up16s_raw_window.py`).
 
 ## Roadmap
 
