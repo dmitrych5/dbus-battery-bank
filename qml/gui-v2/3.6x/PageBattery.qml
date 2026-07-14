@@ -186,54 +186,6 @@ Page {
 			}
 
 			ListText {
-				text: CommonWords.state
-				dataItem.uid: root.bindPrefix + "/State"
-				preferredVisible: dataItem.valid
-				secondaryText: {
-					if (!dataItem.valid) {
-						return ""
-					}
-					if (dataItem.value >= 0 && dataItem.value <= 8) {
-						//% "Initializing"
-						return qsTrId("devicelist_battery_initializing")
-					}
-					switch (dataItem.value) {
-					case VenusOS.Battery_State_Running:
-						return CommonWords.running_status
-					case VenusOS.Battery_State_Error:
-						return CommonWords.error
-					// case Battery_State_Unknown is omitted
-					case VenusOS.Battery_State_Shutdown:
-						//: Status is 'Shutdown'
-						//% "Shutdown"
-						return qsTrId("devicelist_battery_shutdown")
-					case VenusOS.Battery_State_Updating:
-						//: Status is 'Updating'
-						//% "Updating"
-						return qsTrId("devicelist_battery_updating")
-					case VenusOS.Battery_State_Standby:
-						return CommonWords.standby
-					case VenusOS.Battery_State_GoingToRun:
-						//: Status is 'Going to run'
-						//% "Going to run"
-						return qsTrId("devicelist_battery_going_to_run")
-					case VenusOS.Battery_State_Precharging:
-						//: Status is 'Pre-Charging'
-						//% "Pre-Charging"
-						return qsTrId("devicelist_battery_pre_charging")
-					case VenusOS.Battery_State_ContactorCheck:
-						//: Status is 'Contactor check'
-						//% "Contactor check"
-						return qsTrId("devicelist_battery_contactor_check")
-					case VenusOS.Battery_State_Pending:
-						return CommonWords.pending
-					default:
-						return ""
-					}
-				}
-			}
-
-			ListText {
 				text: CommonWords.error
 				dataItem.uid: root.bindPrefix + "/ErrorCode"
 				preferredVisible: dataItem.valid
@@ -278,7 +230,7 @@ Page {
 					Row {
 						id: contentRowOverview
 
-						readonly property real itemWidth: (width - (spacing * 4)) / 5
+						readonly property real itemWidth: (width - (spacing * 6)) / 7
 
 						width: cellOverviewItem.maximumContentWidth
 						spacing: Theme.geometry_listItem_content_spacing
@@ -290,7 +242,7 @@ Page {
 								width: parent.width
 								value: batteryCurrent.value ?? NaN
 								unit: VenusOS.Units_Amp
-								precision: 2
+								precision: 3
 								font.pixelSize: 22
 							}
 
@@ -328,11 +280,31 @@ Page {
 
 							QuantityLabel {
 								width: parent.width
+								value: batteryPower.value ?? NaN
+								unit: VenusOS.Units_Watt
+								precision: 0
+								font.pixelSize: 22
+							}
+
+							Label {
+								width: parent.width
+								horizontalAlignment: Text.AlignHCenter
+								// "Power"
+								text: CommonWords.power_watts
+								color: Theme.color_font_secondary
+								font.pixelSize: Theme.font_size_caption
+							}
+						}
+						Column {
+							width: contentRowOverview.itemWidth
+
+							QuantityLabel {
+								width: parent.width
 								value: cellMaxItem.value ?? NaN
 								unit: VenusOS.Units_Volt_DC
 								precision: 3
-								valueColor: (chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1)
-									|| (dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1)
+								// The highest cell limits charging.
+								valueColor: chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1
 									? "#BF4845" : Theme.color_font_primary
 								font.pixelSize: 22
 							}
@@ -354,8 +326,8 @@ Page {
 								value: cellMinItem.value ?? NaN
 								unit: VenusOS.Units_Volt_DC
 								precision: 3
-								valueColor: (chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1)
-									|| (dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1)
+								// The lowest cell limits discharging.
+								valueColor: dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1
 									? "#BF4845" : Theme.color_font_primary
 								font.pixelSize: 22
 							}
@@ -376,7 +348,7 @@ Page {
 								width: parent.width
 								value: socItem.value ?? NaN
 								unit: VenusOS.Units_Percentage
-								precision: 1
+								precision: 2
 								font.pixelSize: 22
 							}
 
@@ -385,6 +357,25 @@ Page {
 								horizontalAlignment: Text.AlignHCenter
 								//% "SoC"
 								text: qsTrId("dbus_serialbattery_general_soc")
+								color: Theme.color_font_secondary
+								font.pixelSize: Theme.font_size_caption
+							}
+						}
+						Column {
+							width: contentRowOverview.itemWidth
+
+							QuantityLabel {
+								width: parent.width
+								value: consumedAhItem.value ?? NaN
+								unit: VenusOS.Units_AmpHour
+								precision: 2
+								font.pixelSize: 22
+							}
+
+							Label {
+								width: parent.width
+								horizontalAlignment: Text.AlignHCenter
+								text: "Consumed Ah"
 								color: Theme.color_font_secondary
 								font.pixelSize: Theme.font_size_caption
 							}
@@ -402,7 +393,7 @@ Page {
 					Row {
 						id: temperaturesContentRowOverview
 
-						readonly property real itemWidth: (width - (spacing * 5)) / 6
+						readonly property real itemWidth: (width - (spacing * 6)) / 7
 
 						width: temperaturesOverviewItem.maximumContentWidth
 						spacing: Theme.geometry_listItem_content_spacing
@@ -412,11 +403,11 @@ Page {
 
 							QuantityLabel {
 								width: parent.width
-								value: temperatureItem.value ?? NaN
+								value: airTemperatureItem.value ?? NaN
 								unit: Global.systemSettings.temperatureUnit
 								precision: 1
-								valueColor: (chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("cell temperature") !== -1)
-									|| (dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("cell temperature") !== -1)
+								valueColor: (chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("ambient") !== -1)
+									|| (dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("ambient") !== -1)
 									? "#BF4845" : Theme.color_font_primary
 								font.pixelSize: 22
 							}
@@ -424,8 +415,7 @@ Page {
 							Label {
 								width: parent.width
 								horizontalAlignment: Text.AlignHCenter
-								// "Battery"
-								text: CommonWords.battery
+								text: "Ambient"
 								color: Theme.color_font_secondary
 								font.pixelSize: Theme.font_size_caption
 							}
@@ -449,6 +439,28 @@ Page {
 								horizontalAlignment: Text.AlignHCenter
 								//% "MOSFET"
 								text: qsTrId("dbus_serialbattery_general_mosfet")
+								color: Theme.color_font_secondary
+								font.pixelSize: Theme.font_size_caption
+							}
+						}
+						Column {
+							width: temperaturesContentRowOverview.itemWidth
+
+							QuantityLabel {
+								width: parent.width
+								value: temperatureItem.value ?? NaN
+								unit: Global.systemSettings.temperatureUnit
+								precision: 1
+								valueColor: (chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("cell temperature") !== -1)
+									|| (dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("cell temperature") !== -1)
+									? "#BF4845" : Theme.color_font_primary
+								font.pixelSize: 22
+							}
+
+							Label {
+								width: parent.width
+								horizontalAlignment: Text.AlignHCenter
+								text: "Cell avg"
 								color: Theme.color_font_secondary
 								font.pixelSize: Theme.font_size_caption
 							}
@@ -541,14 +553,6 @@ Page {
 				]
 			}
 
-			ListQuantity {
-				// "Power"
-				text: CommonWords.power_watts
-				dataItem.uid: root.bindPrefix + "/Dc/0/Power"
-				preferredVisible: root.isBatteryBank && dataItem.valid
-				unit: VenusOS.Units_Watt
-			}
-
 			ListQuantityGroup {
 				text: CommonWords.battery
 				preferredVisible: !root.isBatteryBank
@@ -608,8 +612,10 @@ Page {
 			}
 
 			ListQuantity {
+				// For the battery bank this duplicates the Overview row's SoC tile.
 				text: CommonWords.state_of_charge
 				dataItem.uid: root.bindPrefix + "/Soc"
+				preferredVisible: !root.isBatteryBank
 				unit: VenusOS.Units_Percentage
 			}
 
@@ -630,20 +636,11 @@ Page {
 			}
 
 			ListTemperature {
+				// For the battery bank this duplicates the Temperatures row's Ambient tile.
 				//% "Air temperature"
-				text: root.isBatteryBank ? "Ambient temperature" : qsTrId("battery_air_temp")
+				text: qsTrId("battery_air_temp")
 				dataItem.uid: root.bindPrefix + "/AirTemperature"
-				preferredVisible: dataItem.valid
-			}
-
-			ListQuantity {
-				// The dbus-battery-bank aggregate repurposes this path for VRM logging of the
-				// PTC overheat-detection chain voltage (times 10 for resolution).
-				//% "Starter voltage"
-				text: productId.value === 0xBA44 ? "PTC voltage ×10" : qsTrId("battery_starter_voltage")
-				dataItem.uid: root.bindPrefix + "/Dc/1/Voltage"
-				preferredVisible: dataItem.valid
-				unit: VenusOS.Units_Volt_DC
+				preferredVisible: !root.isBatteryBank && dataItem.valid
 			}
 
 			ListQuantity {
@@ -671,20 +668,11 @@ Page {
 			}
 
 			ListQuantity {
-				// The dbus-battery-bank aggregate repurposes this path for VRM logging of the
-				// PTC voltage deviation from the temperature-based expectation.
-				//% "Mid-point deviation"
-				text: productId.value === 0xBA44 ? "PTC deviation" : qsTrId("battery_mid_point_deviation")
-				dataItem.uid: root.bindPrefix + "/Dc/0/MidVoltageDeviation"
-				preferredVisible: dataItem.valid
-				unit: VenusOS.Units_Percentage
-			}
-
-			ListQuantity {
+				// For the battery bank this duplicates the Overview row's Consumed Ah tile.
 				//% "Consumed AmpHours"
 				text: qsTrId("battery_consumed_amphours")
 				dataItem.uid: root.bindPrefix + "/ConsumedAmphours"
-				preferredVisible: dataItem.valid
+				preferredVisible: !root.isBatteryBank && dataItem.valid
 				unit: VenusOS.Units_AmpHour
 			}
 
@@ -730,6 +718,54 @@ Page {
 
 			ListAlarmState {
 				dataItem.uid: root.bindPrefix + "/Alarms/Alarm"
+			}
+
+			ListText {
+				text: CommonWords.state
+				dataItem.uid: root.bindPrefix + "/State"
+				preferredVisible: dataItem.valid
+				secondaryText: {
+					if (!dataItem.valid) {
+						return ""
+					}
+					if (dataItem.value >= 0 && dataItem.value <= 8) {
+						//% "Initializing"
+						return qsTrId("devicelist_battery_initializing")
+					}
+					switch (dataItem.value) {
+					case VenusOS.Battery_State_Running:
+						return CommonWords.running_status
+					case VenusOS.Battery_State_Error:
+						return CommonWords.error
+					// case Battery_State_Unknown is omitted
+					case VenusOS.Battery_State_Shutdown:
+						//: Status is 'Shutdown'
+						//% "Shutdown"
+						return qsTrId("devicelist_battery_shutdown")
+					case VenusOS.Battery_State_Updating:
+						//: Status is 'Updating'
+						//% "Updating"
+						return qsTrId("devicelist_battery_updating")
+					case VenusOS.Battery_State_Standby:
+						return CommonWords.standby
+					case VenusOS.Battery_State_GoingToRun:
+						//: Status is 'Going to run'
+						//% "Going to run"
+						return qsTrId("devicelist_battery_going_to_run")
+					case VenusOS.Battery_State_Precharging:
+						//: Status is 'Pre-Charging'
+						//% "Pre-Charging"
+						return qsTrId("devicelist_battery_pre_charging")
+					case VenusOS.Battery_State_ContactorCheck:
+						//: Status is 'Contactor check'
+						//% "Contactor check"
+						return qsTrId("devicelist_battery_contactor_check")
+					case VenusOS.Battery_State_Pending:
+						return CommonWords.pending
+					default:
+						return ""
+					}
+				}
 			}
 
 			ListText {
@@ -851,6 +887,26 @@ Page {
 				]
 			}
 
+			ListQuantity {
+				// The dbus-battery-bank aggregate repurposes this path for VRM logging of the
+				// PTC overheat-detection chain voltage (times 10 for resolution).
+				//% "Starter voltage"
+				text: productId.value === 0xBA44 ? "PTC voltage ×10" : qsTrId("battery_starter_voltage")
+				dataItem.uid: root.bindPrefix + "/Dc/1/Voltage"
+				preferredVisible: dataItem.valid
+				unit: VenusOS.Units_Volt_DC
+			}
+
+			ListQuantity {
+				// The dbus-battery-bank aggregate repurposes this path for VRM logging of the
+				// PTC voltage deviation from the temperature-based expectation.
+				//% "Mid-point deviation"
+				text: productId.value === 0xBA44 ? "PTC deviation" : qsTrId("battery_mid_point_deviation")
+				dataItem.uid: root.bindPrefix + "/Dc/0/MidVoltageDeviation"
+				preferredVisible: dataItem.valid
+				unit: VenusOS.Units_Percentage
+			}
+
 			ListText {
 				// "Alarms"
 				text: CommonWords.alarms
@@ -870,16 +926,6 @@ Page {
 				VeQuickItem {
 					id: cell3Voltage
 					uid: root.bindPrefix + "/Voltages/Cell3"
-				}
-			}
-
-			ListNavigation {
-				text: "Battery service settings"
-				// dbus-battery-bank services: packs (0xBA77) and the aggregate (0xBA44)
-				preferredVisible: root.isBatteryBank
-				onClicked: {
-					Global.pageManager.pushPage("/pages/settings/devicelist/battery/PageBatteryDbusSerialbatterySettings.qml",
-							{ "title": text, "bindPrefix": root.bindPrefix })
 				}
 			}
 
@@ -1176,8 +1222,18 @@ Page {
 		uid: root.bindPrefix + "/Soc"
 	}
 	VeQuickItem {
+		id: consumedAhItem
+		uid: root.bindPrefix + "/ConsumedAmphours"
+	}
+	VeQuickItem {
 		id: chargeModeItem
 		uid: root.bindPrefix + "/Info/ChargeMode"
+	}
+	VeQuickItem {
+		id: airTemperatureItem
+		uid: root.bindPrefix + "/AirTemperature"
+		sourceUnit: Units.unitToVeUnit(VenusOS.Units_Temperature_Celsius)
+		displayUnit: Units.unitToVeUnit(Global.systemSettings.temperatureUnit)
 	}
 
 	VeQuickItem {

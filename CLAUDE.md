@@ -214,23 +214,23 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   serves ≤ v3.79), installed over the stock ones via the overlay-fs app by
   `custom-gui-install.sh`, which `enable.sh` runs on every boot so Cerbo firmware upgrades
   heal themselves. For this project's services (aggregate 0xBA44, packs 0xBA77) `PageBattery`
-  folds the former "dbus-serialbattery - General" page into the main battery page (overview
-  and temperature tiles, power, charge mode, CVL/CCL/DCL with limitation text, allow-to,
-  active alarms) and hides the stock rows/submenus that layout supersedes (Battery V/I/P
-  group, battery temperature row — the Temperatures tiles cover it —, IO and Parameters
-  submenus, per-pack Details); `/AirTemperature` is titled "Ambient temperature"; the debug
-  texts live in a "Debug" submenu (`PageBatteryBankDebug.qml`); a confirmed "Reset protection
-  trips" button sits at the very top of the aggregate's page while `/ProtectionTripped` is 1
-  (plus the always-available copy in "Battery service settings"). Other battery services keep
-  the stock layout. Use plain strings for labels we add — our translation ids are not in
-  Victron's compiled catalog.
+  carries everything on the main battery page: a seven-tile Overview row (current, voltage,
+  power, cell max/min, SoC, consumed Ah), a seven-tile Temperatures row (ambient, MOSFET,
+  cell average, Temp 1–4), charge mode, CVL/CCL/DCL with limitation text, allow-to, the PTC
+  rows, and active alarms — the stock rows/submenus that layout supersedes are hidden
+  (Battery V/I/P group, SoC / battery temperature / air temperature / consumed-Ah rows, IO
+  and Parameters submenus, per-pack Details, the aggregate Details' capacity row). The debug
+  texts live in a "Debug" submenu (`PageBatteryBankDebug.qml`), which also hosts the per-pack
+  "Reset SoC to" control; a confirmed "Reset protection trips" button sits at the very top of
+  the aggregate's page while `/ProtectionTripped` is 1 (the only GUI reset; the ssh fallback
+  is `dbus -y com.victronenergy.battery.aggregate /Settings/ResetProtectionTrips SetValue 1`).
+  Other battery services keep the stock layout. Use plain strings for labels we add — our
+  translation ids are not in Victron's compiled catalog.
 - Browser WASM: built by `scripts/build-wasm-macos.sh` from mr-manuel's venus-os_gui-v2 fork
   with this project's pages applied by `scripts/patch-gui-v2-fork.py` (which also registers
   new page files in the fork's CMakeLists — replacing a stock page needs no registration,
   adding one does); shipped as `wasm/venus-webassembly.zip` and installed by
   `custom-gui-install.sh`. A QML change reaches the browser only after a WASM rebuild.
-- The Ambient tile substitution in the Temperatures row was dropped: the native "Air
-  temperature" row proved sufficient.
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
   bank-level, so per-pack float/bulk state has no meaning. The pack "Debug" submenu instead
   shows the pack's own contribution to the bank decision (`pack_diagnostics_values`: its
@@ -405,8 +405,8 @@ implementation.
 The system is commissioned and permanent: the service runs on the Cerbo, all parity checks
 passed, and the custom browser WASM is built (natively via `scripts/build-wasm-macos.sh`,
 minutes per rebuild thanks to the persistent toolchain) and installed. The operator verified
-the browser UI: pages work, "Battery service settings" with the trip-reset button, and the
-"PTC voltage ×10" / "PTC deviation" row titles.
+the browser UI (the battery pages have since been restructured — see the GUI-v2 QML bullet
+under Publishing — with on-device verification pending in the next tasks).
 
 Pending verification: the first full charge cycle under the new stack — the log should show
 `Charge stage: Bulk -> Absorption -> Float Transition -> Float` plus one
@@ -425,17 +425,19 @@ Next tasks, in priority order:
 
 ## Decided details
 
-- **Ambient temperature UI**: published on `/AirTemperature`, shown on the battery page as an
-  "Ambient temperature" row for our services (other products keep the stock "Air temperature"
-  title); `/Dc/0/Temperature` stays the cell-sensor aggregate for VRM/DVCC/stock pages. The
-  Temperatures tiles' red-highlight-when-limiting checks must keep matching the
-  `LimitSource` limitation strings (they compare lowercased text: "cell voltage",
-  "cell temperature", "mosfet"). Verify whether VRM logs `/AirTemperature` once live; if not
-  and drift monitoring of ambient is wanted, route it through the contained VRM metric-map
-  module.
-- **Operator reset of latched trips**: a button in the shipped GUI-v2 settings page backed by a
-  writable dbus path with a change callback — the same proven mechanism as the existing
-  `/Settings/ResetSocTo` control. The reset emits an Event so it is logged and auditable.
+- **Ambient temperature UI**: published on `/AirTemperature`, shown for our services as the
+  first tile ("Ambient") of the Temperatures row (other products keep the stock "Air
+  temperature" row); `/Dc/0/Temperature` stays the cell-sensor aggregate ("Cell avg" tile)
+  for VRM/DVCC/stock pages. The tiles' red-highlight-when-limiting checks must keep matching
+  the `LimitSource` limitation strings (they compare lowercased text: "cell voltage",
+  "ambient", "cell temperature", "mosfet"; cell max checks the charge limitation, cell min
+  the discharge one). Verify whether VRM logs `/AirTemperature` once live; if not and drift
+  monitoring of ambient is wanted, route it through the contained VRM metric-map module.
+- **Operator reset of latched trips**: a confirmed button on the aggregate's battery page,
+  visible only while `/ProtectionTripped` is 1, backed by a writable dbus path with a change
+  callback — the same proven mechanism as the `/Settings/ResetSocTo` control (which lives at
+  the bottom of the pack "Debug" submenu). The reset emits an Event so it is logged and
+  auditable.
 - **Per-pack SoC reset timing**: keep current behavior (reset when the bank enters
   FloatTransition). May be revisited later.
 - **Project name**: `dbus-battery-bank` (confirmed).

@@ -62,8 +62,8 @@ The zip ships with the normal app deploy (`scripts/deploy.sh` sends it whenever
 regenerates the gzip and hash files the VRM portal check expects.
 
 Verify in the browser with a hard refresh (browsers cache the WASM aggressively): the battery
-pages should work as before, plus "Battery service settings" with the trip-reset button on the
-aggregate and the "PTC voltage ×10" / "PTC deviation" row titles.
+pages should show the project layout — the Overview/Temperatures tile rows on the main battery
+page, the "PTC voltage ×10" / "PTC deviation" row titles, and the "Debug" submenu.
 
 ## Rollback
 

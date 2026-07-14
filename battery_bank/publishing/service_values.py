@@ -46,7 +46,8 @@ def aggregate_service_values(
     remaining_ah = sum(pack.remaining_capacity_ah for pack in packs)
     values: dict[str, object] = {
         "/Dc/0/Voltage": _rounded(decision.voltage_volts, 2),
-        "/Dc/0/Current": _rounded(decision.current_amps, 2),
+        # The shunt current arrives with mA resolution; keep it (the GUI shows 3 decimals).
+        "/Dc/0/Current": _rounded(decision.current_amps, 3),
         "/Dc/0/Power": _rounded(decision.power_watts, 2),
         "/Soc": _rounded(decision.soc_percent, 2),
         "/Capacity": _rounded(remaining_ah, 2) if packs else None,

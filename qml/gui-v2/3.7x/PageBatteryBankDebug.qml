@@ -1,8 +1,9 @@
 /*
 ** dbus-battery-bank: the live control diagnostics texts rendered by the driver
 ** (/Info/ChargeModeDebug and friends). The aggregate shows the bank state machine and limit
-** picture; a pack shows its own contribution to the bank decision. Reached from the "Debug"
-** entry on the battery page.
+** picture; a pack shows its own contribution to the bank decision, plus the manual SoC reset
+** control (a maintenance action, so it lives here). Reached from the "Debug" entry on the
+** battery page.
 */
 
 import QtQuick
@@ -78,6 +79,70 @@ Page {
 				VeQuickItem {
 					id: chargeModeDebugBulk
 					uid: root.bindPrefix + "/Info/ChargeModeDebugBulk"
+				}
+			}
+
+			ListButton {
+				//% "Reset SoC to"
+				text: qsTrId("dbus_serialbattery_settings_reset_soc_to")
+				secondaryText: Units.getCombinedDisplayText(VenusOS.Units_Percentage, resetSocToItem.value)
+				preferredVisible: resetSocToItem.valid
+				onClicked: Global.dialogLayer.open(resetSocToDialogComponent)
+
+				Component {
+					id: resetSocToDialogComponent
+
+					ModalDialog {
+
+						property int resetSocTo: resetSocToItem.value
+
+						//% "Reset SoC to"
+						title: qsTrId("dbus_serialbattery_settings_reset_soc_to")
+
+						onAccepted: resetSocToItem.setValue(resetSocTo)
+
+						contentItem: ModalDialog.FocusableContentItem {
+							Column {
+								width: parent.width
+
+								Label {
+									anchors.horizontalCenter: parent.horizontalCenter
+									font.pixelSize: Theme.font_size_h3
+									text: "%1%".arg(resetSocTo)
+								}
+
+								Item {
+									width: 1
+									height: Theme.geometry_modalDialog_content_margins / 2
+								}
+
+								Slider {
+									id: resetToSocSlider
+
+									anchors.horizontalCenter: parent.horizontalCenter
+									width: parent.width - (2 * Theme.geometry_modalDialog_content_horizontalMargin)
+									value: resetSocTo
+									from: 0
+									to: 100
+									stepSize: 1
+									focus: true
+									onMoved: resetSocTo = value
+
+									KeyNavigationHighlight.active: resetToSocSlider.activeFocus
+									KeyNavigationHighlight.leftMargin: -Theme.geometry_listItem_flat_content_horizontalMargin
+									KeyNavigationHighlight.rightMargin: -Theme.geometry_listItem_flat_content_horizontalMargin
+									KeyNavigationHighlight.topMargin: -Theme.geometry_listItem_content_verticalMargin
+									KeyNavigationHighlight.bottomMargin: -Theme.geometry_listItem_content_verticalMargin
+								}
+							}
+						}
+					}
+
+				}
+
+				VeQuickItem {
+					id: resetSocToItem
+					uid: root.bindPrefix + "/Settings/ResetSocTo"
 				}
 			}
 		}
