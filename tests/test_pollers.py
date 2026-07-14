@@ -4,7 +4,7 @@ from struct import pack
 import pytest
 
 from battery_bank.acquisition.availability import MAX_AVAILABILITY_RETRIES
-from battery_bank.acquisition.battery_poller import PackPoller
+from battery_bank.acquisition.battery_poller import MAX_SET_SOC_RETRIES, PackPoller
 from battery_bank.acquisition.shunt_poller import ShuntPoller
 from battery_bank.config import BatteryPortConfig
 from battery_bank.transport import up16s
@@ -175,17 +175,37 @@ class TestPolling:
     def test_soc_reset_request_sends_set_soc_on_next_poll(self):
         link = FakeLink()
         poller = self.discovered_poller(link, addresses=(2,))
-        # Make PackParams2 available so SetSoc is assumed writable.
-        link.respond(2, up16s.PackStatus, pack_status_payload())
-        link.respond(2, up16s.PackParams2, up16s.PackParams2.STRUCT.pack(8000, b"\x00" * 8, 100, 200))
-        poller.poll()
-
         assert poller.request_soc_reset("UP16S-SN2", 100.0) is True
         set_soc_request = up16s.build_request(2, up16s.SetSoc, up16s.SetSoc.request_payload(100.0))
         link.responses[set_soc_request] = deque([response_frame(2, up16s.SetSoc, b"")])
         link.respond(2, up16s.PackStatus, pack_status_payload())
         poller.poll()
         assert set_soc_request in link.requests
+
+    def test_soc_reset_works_when_pack_params2_is_unavailable(self):
+        """PackParams2 can be unavailable merely because old firmware ignores its partial-read
+        request format; the plain SetSoc write still works there and must not be refused."""
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(2,))
+        for _ in range(MAX_AVAILABILITY_RETRIES):
+            link.respond(2, up16s.PackStatus, pack_status_payload())
+            poller.poll()
+        assert poller.request_soc_reset("UP16S-SN2", 100.0) is True
+        set_soc_request = up16s.build_request(2, up16s.SetSoc, up16s.SetSoc.request_payload(100.0))
+        link.responses[set_soc_request] = deque([response_frame(2, up16s.SetSoc, b"")])
+        poller.poll()
+        assert set_soc_request in link.requests
+
+    def test_soc_reset_refused_after_set_soc_write_attempts_are_exhausted(self):
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(2,))
+        polls_to_exhaust = -(-MAX_AVAILABILITY_RETRIES // MAX_SET_SOC_RETRIES)
+        for _ in range(polls_to_exhaust):
+            assert poller.request_soc_reset("UP16S-SN2", 100.0) is True
+            poller.poll()
+        assert poller.request_soc_reset("UP16S-SN2", 100.0) is False
+        set_soc_request = up16s.build_request(2, up16s.SetSoc, up16s.SetSoc.request_payload(100.0))
+        assert link.requests.count(set_soc_request) == MAX_AVAILABILITY_RETRIES
 
     def test_soc_reset_for_unknown_pack_or_invalid_value_is_refused(self):
         link = FakeLink()

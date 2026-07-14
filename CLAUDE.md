@@ -372,7 +372,9 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
 - Slave SoC via the master is whole-percent; PackParams2 provides hi-res SoC. When PackParams2
   times out transiently, keep the last hi-res SoC unless it diverges >1% from PackStatus SoC
   (prevents SoC flapping on unstable links).
-- SetSoc is assumed available iff PackParams2 is available (same register range).
+- SetSoc availability must be learned from its own write attempts, never inferred from
+  PackParams2: PackParams2 can be unavailable merely because its partial-read request format is
+  ignored by firmware < ~v12, while the plain SetSoc write on the same registers still works.
 - The BMS hard-sets DCL to 0 below 2700 mV min cell voltage (not configurable) — discharge curves
   should cut current slightly above that.
 - Encodings: current `(raw - 300000)/100` A; temperatures `(raw - 500)/10` °C; CRC16-Modbus with

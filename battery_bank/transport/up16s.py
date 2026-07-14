@@ -195,8 +195,9 @@ class ProductInformation(Command):
 
 @dataclass(frozen=True)
 class SetSoc(Command):
-    """Writes SoC; assumed available iff PackParams2 is (same register range). The BMS answers
-    with an empty payload."""
+    """Writes SoC. Availability is independent of PackParams2's: this is a plain write that
+    older firmware accepts even where PackParams2's partial-read format is ignored. The BMS
+    answers with an empty payload."""
 
     MODBUS_FUNC = FUNC_WRITE
     MODBUS_START_ADDR = 0x2006

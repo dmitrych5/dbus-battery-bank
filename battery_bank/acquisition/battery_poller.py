@@ -158,13 +158,15 @@ class PackPoller:
         return snapshots
 
     def request_soc_reset(self, unique_id: str, soc_percent: float) -> bool:
-        """Queues a SoC write for the next poll. SetSoc is assumed available iff PackParams2
-        is (same register range)."""
+        """Queues a SoC write for the next poll. SetSoc availability is learned from its own
+        write attempts — PackParams2's verdict says nothing about it, because that command can
+        be unavailable merely for its partial-read request format (firmware < ~v12) while the
+        plain SetSoc write still works."""
         if not 0 <= soc_percent <= 100:
             return False
         for address, identity in self._identities.items():
             if identity.unique_id == unique_id:
-                if self._availability.status(address, up16s.PackParams2) is AvailabilityStatus.UNAVAILABLE:
+                if self._availability.status(address, up16s.SetSoc) is AvailabilityStatus.UNAVAILABLE:
                     return False
                 self._pending_soc_resets[address] = soc_percent
                 return True
@@ -172,12 +174,10 @@ class PackPoller:
 
     def _set_soc(self, address: int, soc_percent: float) -> None:
         payload = up16s.SetSoc.request_payload(soc_percent)
-        for _ in range(MAX_SET_SOC_RETRIES):
-            if self._send(address, up16s.SetSoc, payload) is not None:
-                logger.info("Successfully set SOC on battery %d to %.2f%%", address, soc_percent)
-                return
-            self._reopen_if_interfered()
-        logger.error("Couldn't set SOC on battery %d", address)
+        if self._send_optional(address, up16s.SetSoc, payload, attempts=MAX_SET_SOC_RETRIES) is not None:
+            logger.info("Successfully set SOC on battery %d to %.2f%%", address, soc_percent)
+        else:
+            logger.error("Couldn't set SOC on battery %d", address)
 
     def _send(self, address: int, command: type[up16s.CommandT], payload: bytes = b"") -> up16s.CommandT | None:
         request = up16s.build_request(address, command, payload)
@@ -205,11 +205,13 @@ class PackPoller:
             self._link.reopen()
             self._sleep(INTERFERENCE_DELAY_SECONDS)
 
-    def _send_optional(self, address: int, command: type[up16s.CommandT], attempts: int = 1) -> up16s.CommandT | None:
+    def _send_optional(
+        self, address: int, command: type[up16s.CommandT], payload: bytes = b"", attempts: int = 1
+    ) -> up16s.CommandT | None:
         for _ in range(attempts):
             if not self._availability.should_send(address, command):
                 return None
-            result = self._send(address, command)
+            result = self._send(address, command, payload)
             if result is not None:
                 if self._availability.record_success(address, command):
                     logger.info("Marking %s command available on battery %d", command.__name__, address)
