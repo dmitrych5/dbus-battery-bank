@@ -5,12 +5,11 @@ from struct import pack
 import pytest
 
 from battery_bank.acquisition.availability import MAX_AVAILABILITY_RETRIES
-from battery_bank.acquisition.battery_poller import MAX_SET_SOC_RETRIES, RAW_WINDOW_CHUNK_REGISTERS, PackPoller
+from battery_bank.acquisition.battery_poller import MAX_SET_SOC_RETRIES, PackPoller
 from battery_bank.acquisition.shunt_poller import ShuntPoller
 from battery_bank.config import BatteryPortConfig
 from battery_bank.transport import up16s, up16s_raw_window
 from tests.test_up16s import response_frame
-from tests.test_up16s_raw_window import window_response
 from tests.test_vedirect import HISTORY_FIELDS, SHUNT_FIELDS, frame_bytes
 
 PORT = "/dev/ttyUSB0"
@@ -74,10 +73,8 @@ def script_full_pack(link, address, repeat=1):
 
 
 def script_raw_window(link, address):
-    for first in range(0, up16s_raw_window.WINDOW_REGISTER_COUNT, RAW_WINDOW_CHUNK_REGISTERS):
-        count = min(RAW_WINDOW_CHUNK_REGISTERS, up16s_raw_window.WINDOW_REGISTER_COUNT - first)
-        request = up16s_raw_window.build_window_request(address, first, count)
-        link.responses.setdefault(request, deque()).append(window_response(address, first, [0] * count))
+    for part in up16s_raw_window.WINDOW_PARTS:
+        link.respond(address, part, pack(f">{part.MODBUS_ADDR_LEN}H", *[0] * part.MODBUS_ADDR_LEN))
 
 
 class TestDiscovery:
@@ -140,8 +137,8 @@ class TestDiscovery:
         with caplog.at_level(logging.INFO):
             poller.discover()
             poller.discover()
-        first_chunk_request = up16s_raw_window.build_window_request(1, 0, RAW_WINDOW_CHUNK_REGISTERS)
-        assert link.requests.count(first_chunk_request) == 1
+        part1_request = up16s.build_request(1, up16s_raw_window.RawWindowPart1)
+        assert link.requests.count(part1_request) == 1
         assert caplog.text.count("raw status window") == 1
         assert "pack voltage" in caplog.text
 

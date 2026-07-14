@@ -2,36 +2,41 @@ from struct import pack
 
 import pytest
 
-from battery_bank.transport.up16s import CRC_STRUCT, FUNC_READ, FrameError, build_frame, crc16, parse_response
+from battery_bank.transport.up16s import CRC_STRUCT, FrameError, build_request, crc16, parse_response
 from battery_bank.transport.up16s_raw_window import (
+    WINDOW_PARTS,
     WINDOW_REGISTER_COUNT,
-    WINDOW_START_ADDR,
-    RawWindow,
-    build_window_request,
+    RawWindowPart1,
+    RawWindowPart2,
     describe_window,
     from_raw_window_current_to_amps,
 )
-
-
-def window_response(address: int, first_register: int, values) -> bytes:
-    start = WINDOW_START_ADDR + first_register
-    return build_frame(address, FUNC_READ, start, start + len(values), pack(f">{len(values)}H", *values))
+from tests.test_up16s import response_frame
 
 
 class TestCodec:
-    def test_request_matches_the_documented_capture(self):
-        request = build_window_request(2, 0x06, 0x20 - 0x06)  # registers 6..0x1F from slave 2
-        assert request[:8] == bytes.fromhex("02 78 30 06 30 20 00 00".replace(" ", ""))
+    def test_part_requests_tile_the_window_up_to_register_0x100(self):
+        request = build_request(2, RawWindowPart1)
+        assert request[:8] == bytes.fromhex("02 78 30 00 30 80 00 00".replace(" ", ""))
         assert CRC_STRUCT.unpack(request[8:])[0] == crc16(request[:8])
+        # Part 2 starts where part 1 ends (the end address is exclusive) and covers 0x100.
+        assert build_request(2, RawWindowPart2)[:8] == bytes.fromhex("02 78 30 80 31 01 00 00".replace(" ", ""))
+        assert WINDOW_REGISTER_COUNT == 0x101
 
     def test_round_trip(self):
-        frame = window_response(1, 0, (0, 1, 0xFFFF))
-        assert parse_response(1, RawWindow, frame).registers == (0, 1, 0xFFFF)
+        frame = response_frame(1, RawWindowPart1, pack(">3H", 0, 1, 0xFFFF))
+        assert parse_response(1, RawWindowPart1, frame).registers == (0, 1, 0xFFFF)
 
     def test_odd_payload_length_raises(self):
-        frame = build_frame(1, FUNC_READ, WINDOW_START_ADDR, WINDOW_START_ADDR + 1, b"\x01")
+        frame = response_frame(1, RawWindowPart1, b"\x01")
         with pytest.raises(FrameError, match="whole number of registers"):
-            parse_response(1, RawWindow, frame)
+            parse_response(1, RawWindowPart1, frame)
+
+    def test_parts_are_contiguous(self):
+        expected_start = WINDOW_PARTS[0].MODBUS_START_ADDR
+        for part in WINDOW_PARTS:
+            assert part.MODBUS_START_ADDR == expected_start
+            expected_start += part.MODBUS_ADDR_LEN
 
     def test_window_current_conversion(self):
         assert from_raw_window_current_to_amps(29500) == pytest.approx(-5.0)

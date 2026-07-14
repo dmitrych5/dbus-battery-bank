@@ -2,9 +2,10 @@
 
 The window is a direct view of the BMS's internal status array: request start address maps to
 array register (`register = start_addr - 0x3000`), the end address is exclusive, and the
-firmware caps registers at WINDOW_REGISTER_COUNT. Unlike PackStatus, which a chain master
-answers for its slaves from a cache refreshed only about every 50 s, this read reaches the
-addressed pack's live state — the reason the command is worth validating at all.
+firmware maps registers up to 0x200 — but everything at and after 0x101 reads as zeros on the
+deployed firmware, so only registers through 0x100 are requested. Unlike PackStatus, which a
+chain master answers for its slaves from a cache refreshed only about every 50 s, this read
+reaches the addressed pack's live state — the reason the command is worth validating at all.
 
 UNTRUSTED: the command is not JBD-documented, so nothing decoded here may feed control until
 it has been validated against the proven serialized commands (see docs/up16s-raw-window.md
@@ -22,16 +23,17 @@ from dataclasses import dataclass
 from struct import Struct
 from typing import Callable, Sequence
 
-from battery_bank.transport.up16s import FUNC_READ, Command, FrameError, build_frame, from_raw_temperature_to_celsius
+from battery_bank.transport.up16s import FUNC_READ, Command, FrameError, from_raw_temperature_to_celsius
 
 WINDOW_START_ADDR = 0x3000
-WINDOW_REGISTER_COUNT = 0x200
 
 
 @dataclass(frozen=True)
 class RawWindow(Command):
     """A contiguous run of raw 16-bit status-array registers; the payload length alone
-    determines how many arrive."""
+    determines how many arrive. Read as two part commands so each response stays near the
+    proven PackStatus size instead of one ~0.5 KiB frame flirting with the serial timeout
+    at 9600 baud."""
 
     MODBUS_FUNC = FUNC_READ
 
@@ -44,9 +46,20 @@ class RawWindow(Command):
         return cls(Struct(f">{len(payload) // 2}H").unpack(payload))
 
 
-def build_window_request(address: int, first_register: int, register_count: int) -> bytes:
-    start_addr = WINDOW_START_ADDR + first_register
-    return build_frame(address, FUNC_READ, start_addr, start_addr + register_count)
+class RawWindowPart1(RawWindow):
+    MODBUS_START_ADDR = WINDOW_START_ADDR
+    MODBUS_ADDR_LEN = 0x80
+
+
+class RawWindowPart2(RawWindow):
+    """Ends after register 0x100, the last one observed nonzero (see the module docstring)."""
+
+    MODBUS_START_ADDR = WINDOW_START_ADDR + RawWindowPart1.MODBUS_ADDR_LEN
+    MODBUS_ADDR_LEN = 0x81
+
+
+WINDOW_PARTS = (RawWindowPart1, RawWindowPart2)
+WINDOW_REGISTER_COUNT = sum(part.MODBUS_ADDR_LEN for part in WINDOW_PARTS)
 
 
 def from_raw_window_current_to_amps(raw: int) -> float:

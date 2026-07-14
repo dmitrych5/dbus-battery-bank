@@ -34,9 +34,6 @@ INTERFERENCE_DELAY_SECONDS = 1.0
 MAX_INTERFERENCE_RETRY_SECONDS = 60.0
 """How much time to wait for interference to end during discovery."""
 MAX_SET_SOC_RETRIES = 3
-RAW_WINDOW_CHUNK_REGISTERS = 0x80
-"""One chunk's 256-byte payload stays near the proven PackStatus response size; the full
-window in a single frame (1 KiB) would flirt with SERIAL_TIMEOUT_SECONDS at 9600 baud."""
 
 
 class Link(Protocol):
@@ -118,16 +115,15 @@ class PackPoller:
         offline against the proven commands before the window is trusted for anything.
         A failure only costs the dump; discovery has already succeeded."""
         registers: list[int] = []
-        for first_register in range(0, up16s_raw_window.WINDOW_REGISTER_COUNT, RAW_WINDOW_CHUNK_REGISTERS):
-            count = min(RAW_WINDOW_CHUNK_REGISTERS, up16s_raw_window.WINDOW_REGISTER_COUNT - first_register)
-            request = up16s_raw_window.build_window_request(address, first_register, count)
-            chunk = self._exchange(address, up16s_raw_window.RawWindow, request)
+        for part in up16s_raw_window.WINDOW_PARTS:
+            chunk = self._send(address, part)
             if chunk is None:
-                logger.warning("Battery %d: no answer for raw window registers 0x%03X-0x%03X", address, first_register, first_register + count - 1)
+                logger.warning("Battery %d: no answer for raw window %s", address, part.__name__)
                 break
             registers.extend(chunk.registers)
-            if len(chunk.registers) != count:
-                logger.warning("Battery %d: raw window returned %d registers instead of %d from 0x%03X", address, len(chunk.registers), count, first_register)
+            if len(chunk.registers) != part.MODBUS_ADDR_LEN:
+                # A short part would shift every later register under the wrong label.
+                logger.warning("Battery %d: %s returned %d registers instead of %d", address, part.__name__, len(chunk.registers), part.MODBUS_ADDR_LEN)
                 break
         if registers:
             logger.info("Battery %d raw status window (%d registers):\n%s", address, len(registers), up16s_raw_window.describe_window(registers))
@@ -204,9 +200,7 @@ class PackPoller:
             logger.error("Couldn't set SOC on battery %d", address)
 
     def _send(self, address: int, command: type[up16s.CommandT], payload: bytes = b"") -> up16s.CommandT | None:
-        return self._exchange(address, command, up16s.build_request(address, command, payload))
-
-    def _exchange(self, address: int, command: type[up16s.CommandT], request: bytes) -> up16s.CommandT | None:
+        request = up16s.build_request(address, command, payload)
         response = self._link.request(request, up16s.RESPONSE_PAYLOAD_LENGTH_OFFSET, RESPONSE_OVERHEAD_LENGTH)
         if response is None:
             return None

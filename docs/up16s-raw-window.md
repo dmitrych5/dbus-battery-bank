@@ -13,7 +13,9 @@ today it is only dumped to the log once per pack at discovery.
 
 The window maps request start address → status-array register: `register = start_addr −
 0x3000`. The scan is end-exclusive, so to read registers R0..R1 request start `0x3000+R0`,
-end `0x3000+R1+1`. Range cap: `register < 0x200`.
+end `0x3000+R1+1`. Range cap: `register < 0x200`; on the deployed firmware everything at and
+after register 0x101 reads as zeros, so the driver requests only registers 0x000–0x100 (as
+two fixed part commands, keeping each response near the proven PackStatus size).
 
 Example — pack voltage through all cells and temps (regs 6…0x1F) from slave 2:
 `02 78 30 06 30 20 00 00 <crc>`.
