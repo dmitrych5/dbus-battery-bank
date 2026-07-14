@@ -385,20 +385,15 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
 
 ## Roadmap
 
-1. **Parity**: reproduce the deployed behavior (current configs in `../dbus-battery-configs`)
-   on the new architecture, including VRM continuity (service name, DeviceInstance, workaround
-   metric paths). Ambient-temperature limiting and UI exposure are included here since the
-   protocol already delivers the value.
-2. **Balancer-aware float switch**: model the balancer's cell-voltage cutoff in the
+1. **Balancer-aware float switch**: model the balancer's cell-voltage cutoff in the
    absorption→float decision so charging reliably completes, and retire the VOLTAGE_DROP offset.
-3. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
+2. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
    information once all packs are polled in-process; drop if provably redundant. Likewise
    revisit `require_direct_connection` — it was a workaround for the old per-battery driver
    instances being unable to coordinate when some packs were unreachable; with all packs in one
    process, direct-connection detection can likely be automatic (probe IndividualPackStatus)
    instead of configured.
-
-4. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
+3. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
    temperature at roughly the same time of day yesterday resembles today better than a
    many-hours-old state from today. Idea to explore: every few hours persist per-hour data
    points for the last ~25 hours (25 so the current time of day exists for both today and
@@ -415,12 +410,7 @@ The system is commissioned and permanent: the service runs on the Cerbo, all par
 passed, and the custom browser WASM is built (natively via `scripts/build-wasm-macos.sh`,
 minutes per rebuild thanks to the persistent toolchain) and installed. The operator verified
 the browser UI (the battery pages have since been restructured — see the GUI-v2 QML bullet
-under Publishing — with on-device verification pending in the next tasks).
-
-Pending verification: the first full charge cycle under the new stack — the log should show
-`Charge stage: Bulk -> Absorption -> Float Transition -> Float` plus one
-"Successfully set SOC ... to 100.00%" per pack (grep the log on the device; also check VRM
-that CVL dropped to float afterwards).
+under Publishing).
 
 Next tasks, in priority order:
 
@@ -450,8 +440,7 @@ Next tasks, in priority order:
   the bottom of the pack "Debug" submenu). The reset emits an Event so it is logged and
   auditable.
 - **Per-pack SoC reset timing**: keep current behavior (reset when the bank enters
-  FloatTransition). May be revisited later.
-- **Project name**: `dbus-battery-bank` (confirmed).
+  FloatTransition).
 
 ## Open design questions
 
