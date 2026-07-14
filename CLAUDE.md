@@ -231,6 +231,13 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   new page files in the fork's CMakeLists — replacing a stock page needs no registration,
   adding one does); shipped as `wasm/venus-webassembly.zip` and installed by
   `custom-gui-install.sh`. A QML change reaches the browser only after a WASM rebuild.
+- **QML must be compatible with the fork's gui-v2 branch, not newer firmware** (a trap that
+  already bit once): base page copies on the fork's sources (`build/gui-v2/pages/...`), never
+  on QML sets from newer Venus versions — e.g. `KeyNavigationHighlight` is a plain Item on
+  the branch but an attached type later, and the attached syntax makes the whole page fail to
+  create. `pushPage` pre-creates the target and on any error silently aborts (just a
+  `console.warn`), so a broken page shows up as a menu entry that highlights but does not
+  navigate — check the browser devtools console for "Aborted attempt to push page".
 - Per-pack GUI pages intentionally show no charge-stage debug texts: the stage machine is
   bank-level, so per-pack float/bulk state has no meaning. The pack "Debug" submenu instead
   shows the pack's own contribution to the bank decision (`pack_diagnostics_values`: its
@@ -428,11 +435,13 @@ Next tasks, in priority order:
 - **Ambient temperature UI**: published on `/AirTemperature`, shown for our services as the
   first tile ("Ambient") of the Temperatures row (other products keep the stock "Air
   temperature" row); `/Dc/0/Temperature` stays the cell-sensor aggregate ("Cell avg" tile)
-  for VRM/DVCC/stock pages. The tiles' red-highlight-when-limiting checks must keep matching
-  the `LimitSource` limitation strings (they compare lowercased text: "cell voltage",
-  "ambient", "cell temperature", "mosfet"; cell max checks the charge limitation, cell min
-  the discharge one). Verify whether VRM logs `/AirTemperature` once live; if not and drift
-  monitoring of ambient is wanted, route it through the contained VRM metric-map module.
+  for VRM/DVCC/stock pages. The temperature tiles' red-highlight-when-limiting checks must
+  keep matching the `LimitSource` limitation strings (they compare lowercased text:
+  "ambient", "cell temperature", "mosfet"); the cell max/min tiles are deliberately not
+  highlighted (the Cell Voltages page colors the extreme cells instead: balancing orange
+  takes precedence, then maximum red / minimum blue). Verify whether VRM logs
+  `/AirTemperature` once live; if not and drift monitoring of ambient is wanted, route it
+  through the contained VRM metric-map module.
 - **Operator reset of latched trips**: a confirmed button on the aggregate's battery page,
   visible only while `/ProtectionTripped` is 1, backed by a writable dbus path with a change
   callback — the same proven mechanism as the `/Settings/ResetSocTo` control (which lives at

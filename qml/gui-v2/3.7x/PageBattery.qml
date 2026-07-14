@@ -303,9 +303,6 @@ Page {
 								value: cellMaxItem.value ?? NaN
 								unit: VenusOS.Units_Volt_DC
 								precision: 3
-								// The highest cell limits charging.
-								valueColor: chargeLimitationItem.valid && chargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1
-									? "#BF4845" : Theme.color_font_primary
 								font.pixelSize: 22
 							}
 
@@ -326,9 +323,6 @@ Page {
 								value: cellMinItem.value ?? NaN
 								unit: VenusOS.Units_Volt_DC
 								precision: 3
-								// The lowest cell limits discharging.
-								valueColor: dischargeLimitationItem.valid && dischargeLimitationItem.value.toLowerCase().indexOf("cell voltage") !== -1
-									? "#BF4845" : Theme.color_font_primary
 								font.pixelSize: 22
 							}
 
@@ -676,40 +670,12 @@ Page {
 				unit: VenusOS.Units_AmpHour
 			}
 
-			ListQuantityGroup {
-				//% "Installed / Available capacity"
-				text: qsTrId("batterydetails_installed_available_capacity")
-				preferredVisible: root.isBatteryBank && (installedCapacityItem.valid || availableCapacityItem.valid)
-				model: QuantityObjectModel {
-					QuantityObject { object: installedCapacityItem; unit: VenusOS.Units_AmpHour }
-					QuantityObject { object: availableCapacityItem; unit: VenusOS.Units_AmpHour }
-				}
-
-				VeQuickItem {
-					id: installedCapacityItem
-					uid: root.bindPrefix + "/InstalledCapacity"
-				}
-
-				VeQuickItem {
-					id: availableCapacityItem
-					uid: root.bindPrefix + "/Capacity"
-				}
-			}
-
 			ListQuantity {
 				//% "Bus voltage"
 				text: qsTrId("battery_buss_voltage")
 				dataItem.uid: root.bindPrefix + "/BussVoltage"
 				preferredVisible: dataItem.valid
 				unit: VenusOS.Units_Volt_DC
-			}
-
-			ListText {
-				//% "Time-to-go"
-				text: qsTrId("battery_time_to_go")
-				dataItem.uid: root.bindPrefix + "/TimeToGo"
-				preferredVisible: dataItem.seen
-				secondaryText: Utils.secondsToString(dataItem.value)
 			}
 
 			ListRelayState {
@@ -829,6 +795,34 @@ Page {
 				}
 			}
 
+			ListQuantityGroup {
+				//% "Installed / Available capacity"
+				text: qsTrId("batterydetails_installed_available_capacity")
+				preferredVisible: root.isBatteryBank && (installedCapacityItem.valid || availableCapacityItem.valid)
+				model: QuantityObjectModel {
+					QuantityObject { object: installedCapacityItem; unit: VenusOS.Units_AmpHour }
+					QuantityObject { object: availableCapacityItem; unit: VenusOS.Units_AmpHour }
+				}
+
+				VeQuickItem {
+					id: installedCapacityItem
+					uid: root.bindPrefix + "/InstalledCapacity"
+				}
+
+				VeQuickItem {
+					id: availableCapacityItem
+					uid: root.bindPrefix + "/Capacity"
+				}
+			}
+
+			ListText {
+				//% "Time-to-go"
+				text: qsTrId("battery_time_to_go")
+				dataItem.uid: root.bindPrefix + "/TimeToGo"
+				preferredVisible: dataItem.seen
+				secondaryText: Utils.secondsToString(dataItem.value)
+			}
+
 			ListItem {
 				id: allowToOverviewItem
 				//% "Allow to"
@@ -919,7 +913,7 @@ Page {
 				text: "Cell Voltages"
 				preferredVisible: cell3Voltage.valid
 				onClicked: {
-					Global.pageManager.pushPage("/pages/settings/devicelist/battery/PageBatteryDbusSerialbatteryCellVoltages.qml",
+					Global.pageManager.pushPage("/pages/settings/devicelist/battery/PageBatteryCellVoltages.qml",
 							{ "title": text, "bindPrefix": root.bindPrefix })
 				}
 
@@ -956,7 +950,7 @@ Page {
 						timeToSoc95.seen ||
 						timeToSoc100.seen
 				onClicked: {
-					Global.pageManager.pushPage("/pages/settings/devicelist/battery/PageBatteryDbusSerialbatteryTimeToSoc.qml",
+					Global.pageManager.pushPage("/pages/settings/devicelist/battery/PageBatteryTimeToSoc.qml",
 							{ "title": text, "bindPrefix": root.bindPrefix })
 				}
 

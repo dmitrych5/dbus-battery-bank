@@ -14,9 +14,16 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).parent.parent
 PAGES_SUBDIR = "pages/settings/devicelist/battery"
 
-REPLACED_PAGES = ("PageBattery.qml", "PageBatteryDetails.qml", "PageBatteryHistory.qml", "PageBatteryBankDebug.qml")
+REPLACED_PAGES = (
+    "PageBattery.qml",
+    "PageBatteryDetails.qml",
+    "PageBatteryHistory.qml",
+    "PageBatteryBankDebug.qml",
+    "PageBatteryCellVoltages.qml",
+    "PageBatteryTimeToSoc.qml",
+)
 CMAKE_REGISTRATION_ANCHOR = f"    {PAGES_SUBDIR}/PageBatteryDbusSerialbattery.qml\n"
-NEW_PAGES_TO_REGISTER = ("PageBatteryBankDebug.qml",)
+NEW_PAGES_TO_REGISTER = ("PageBatteryBankDebug.qml", "PageBatteryCellVoltages.qml", "PageBatteryTimeToSoc.qml")
 
 
 def main() -> None:

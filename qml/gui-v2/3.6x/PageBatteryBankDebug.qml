@@ -116,6 +116,10 @@ Page {
 									height: Theme.geometry_modalDialog_content_margins / 2
 								}
 
+								// No KeyNavigationHighlight here: in the gui-v2 branch the WASM
+								// is built from it is an Item, not an attached type, and the
+								// attached syntax makes the whole page fail to load (the trap
+								// behind an unclickable menu entry).
 								Slider {
 									id: resetToSocSlider
 
@@ -127,12 +131,6 @@ Page {
 									stepSize: 1
 									focus: true
 									onMoved: resetSocTo = value
-
-									KeyNavigationHighlight.active: resetToSocSlider.activeFocus
-									KeyNavigationHighlight.leftMargin: -Theme.geometry_listItem_flat_content_horizontalMargin
-									KeyNavigationHighlight.rightMargin: -Theme.geometry_listItem_flat_content_horizontalMargin
-									KeyNavigationHighlight.topMargin: -Theme.geometry_listItem_content_verticalMargin
-									KeyNavigationHighlight.bottomMargin: -Theme.geometry_listItem_content_verticalMargin
 								}
 							}
 						}
