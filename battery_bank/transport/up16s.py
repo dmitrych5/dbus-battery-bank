@@ -220,14 +220,9 @@ def crc16(data: bytes) -> int:
 
 
 def build_request(address: int, command: type[Command], payload: bytes = b"") -> bytes:
-    start = command.MODBUS_START_ADDR
-    return build_frame(address, command.MODBUS_FUNC, start, start + command.MODBUS_ADDR_LEN, payload)
-
-
-def build_frame(address: int, function: int, start_addr: int, end_addr: int, payload: bytes = b"") -> bytes:
-    frame = FRAME_HEADER_STRUCT.pack(address, function, start_addr, end_addr, len(payload))
-    frame += payload
-    return frame + CRC_STRUCT.pack(crc16(frame))
+    request = FRAME_HEADER_STRUCT.pack(address, command.MODBUS_FUNC, command.MODBUS_START_ADDR, command.MODBUS_START_ADDR + command.MODBUS_ADDR_LEN, len(payload))
+    request += payload
+    return request + CRC_STRUCT.pack(crc16(request))
 
 
 def parse_response(address: int, command: type[CommandT], response: bytes) -> CommandT:

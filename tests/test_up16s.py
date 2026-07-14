@@ -5,12 +5,12 @@ import pytest
 from battery_bank.core.values import AlarmSeverity
 from battery_bank.transport.up16s import (
     CRC_STRUCT,
+    FRAME_HEADER_STRUCT,
     FrameError,
     IndividualPackStatus,
     PackParams2,
     PackStatus,
     SetSoc,
-    build_frame,
     build_request,
     crc16,
     decode_alarms,
@@ -22,7 +22,9 @@ from battery_bank.transport.up16s import (
 
 
 def response_frame(address: int, command, payload: bytes) -> bytes:
-    return build_frame(address, command.MODBUS_FUNC, command.MODBUS_START_ADDR, command.MODBUS_START_ADDR + command.MODBUS_ADDR_LEN, payload)
+    frame = FRAME_HEADER_STRUCT.pack(address, command.MODBUS_FUNC, command.MODBUS_START_ADDR, command.MODBUS_START_ADDR + command.MODBUS_ADDR_LEN, len(payload))
+    frame += payload
+    return frame + CRC_STRUCT.pack(crc16(frame))
 
 
 class TestCodec:
