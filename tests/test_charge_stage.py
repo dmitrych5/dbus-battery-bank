@@ -15,7 +15,7 @@ STAGE_CONFIG = ChargeStageConfig(
     balanced_cell_diff_volts=0.020,
     balanced_cell_diff_restart_margin_volts=0.003,
     rebulk_soc_percent=96.0,
-    cvl_charger_offset_volts=0.05,
+    full_detection_tolerance_volts=0.08,
 )
 CONTROLLER = CvlControllerConfig(volts_per_volt_second=0.2, setpoint_margin_volts=0.020)
 
@@ -58,6 +58,16 @@ class TestStageTransitions:
 
     def test_stays_in_bulk_until_every_pack_is_full(self):
         result = Bank().step([pack(**FULL_BALANCED_PACK_KWARGS, unique_id="pack-1"), pack(base_cell_volts=3.55, unique_id="pack-2")])
+        assert result.stage is ChargeStage.BULK
+
+    def test_full_within_detection_tolerance_enters_absorption(self):
+        # Sum 57.536 V is below the 57.60 V target but within the 0.08 V tolerance.
+        result = Bank().step([pack(base_cell_volts=3.596, soc=97.0)])
+        assert result.stage is ChargeStage.ABSORPTION
+
+    def test_full_beyond_detection_tolerance_stays_in_bulk(self):
+        # Sum 57.44 V misses the 57.60 V target by more than the 0.08 V tolerance.
+        result = Bank().step([pack(base_cell_volts=3.59, soc=97.0)])
         assert result.stage is ChargeStage.BULK
 
     def test_stays_in_bulk_while_unbalanced(self):

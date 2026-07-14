@@ -229,7 +229,7 @@ class TestSocReset:
         full_packs_kwargs = dict(cell_voltages_volts=(3.61,) * 16, soc_percent=97.0)
         state = ControlState()
         now = 1000.0
-        for advance in (1.0, 121.0):
+        for advance in (1.0, CONFIG.charge_stage.absorption_hold_seconds + 1.0):
             now += advance
             inputs = BankInputs(packs=make_packs(taken_at=now - 0.5, **full_packs_kwargs), shunt=make_shunt(taken_at=now - 0.5))
             state, decision, _ = step_bank(CONFIG, state, inputs, now_monotonic=now)

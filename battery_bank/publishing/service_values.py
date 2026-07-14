@@ -65,7 +65,7 @@ def aggregate_service_values(
         "/Io/AllowToCharge": int(decision.allow_to_charge),
         "/Io/AllowToDischarge": int(decision.allow_to_discharge),
         "/Balancing": int(any(any(pack.cells_balancing) for pack in packs)),
-        "/Info/MaxChargeVoltage": _published_cvl(config, decision),
+        "/Info/MaxChargeVoltage": _rounded(decision.cvl_volts, 2),
         "/Info/MaxChargeCurrent": round(decision.ccl_amps, 1),
         "/Info/MaxDischargeCurrent": round(decision.dcl_amps, 1),
         "/Info/ChargeMode": decision.charge_stage.value,
@@ -86,9 +86,8 @@ def aggregate_service_values(
 def pack_service_values(config: Config, decision: BankDecision, snapshot: BatterySnapshot) -> dict[str, object]:
     pack = snapshot
     values: dict[str, object] = {
-        # The CVL is a bank-level value; packs publish it too (with the charger offset, like
-        # the aggregate) so their GUI pages show it.
-        "/Info/MaxChargeVoltage": _published_cvl(config, decision),
+        # The CVL is a bank-level value; packs publish it too so their GUI pages show it.
+        "/Info/MaxChargeVoltage": _rounded(decision.cvl_volts, 2),
         "/Dc/0/Voltage": round(pack.voltage_volts, 2),
         "/Dc/0/Current": round(pack.current_amps, 2),
         "/Dc/0/Power": round(pack.voltage_volts * pack.current_amps, 2),
@@ -224,12 +223,6 @@ def _pack_limit_values(detail, unique_id: str, current_path: str, limitation_pat
         current_path: round(pack_limit.amps, 1),
         limitation_path: limitation_text(pack_limit.active_sources, held_at_zero=False),
     }
-
-
-def _published_cvl(config: Config, decision: BankDecision) -> float | None:
-    if decision.cvl_volts is None:
-        return None
-    return round(decision.cvl_volts + config.charge_stage.cvl_charger_offset_volts, 2)
 
 
 def _alarm_values(alarms: PackAlarms) -> dict[str, int]:

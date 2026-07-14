@@ -96,8 +96,8 @@ class TestRestore:
         state, decision, _ = step_bank(
             CONFIG,
             restored,
-            BankInputs(packs=make_packs(taken_at=1121.5, cell_voltages_volts=(3.61,) * 16, soc_percent=97.0), shunt=make_shunt(taken_at=1121.5)),
-            now_monotonic=1122.0,
+            BankInputs(packs=make_packs(taken_at=1301.5, cell_voltages_volts=(3.61,) * 16, soc_percent=97.0), shunt=make_shunt(taken_at=1301.5)),
+            now_monotonic=1302.0,
         )
         assert decision.charge_stage is ChargeStage.FLOAT_TRANSITION
 

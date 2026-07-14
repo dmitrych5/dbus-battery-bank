@@ -21,7 +21,7 @@ class TestAggregateServiceValues:
     def test_control_and_measurement_paths(self):
         decision, inputs = healthy_decision()
         values = aggregate_service_values(CONFIG, decision, inputs.packs, inputs.shunt)
-        assert values["/Info/MaxChargeVoltage"] == pytest.approx(57.6 + 0.05)
+        assert values["/Info/MaxChargeVoltage"] == pytest.approx(57.6)
         assert values["/Info/MaxChargeCurrent"] == pytest.approx(30.0)
         assert values["/Info/MaxDischargeCurrent"] == pytest.approx(750.0)
         assert values["/Info/ChargeMode"] == "Bulk"
@@ -139,7 +139,7 @@ class TestServiceInternalAlarm:
 
 
 class TestPackCvl:
-    def test_pack_publishes_the_bank_cvl_with_charger_offset(self):
+    def test_pack_publishes_the_bank_cvl(self):
         decision, inputs = healthy_decision()
         values = pack_service_values(CONFIG, decision, inputs.packs[0])
-        assert values["/Info/MaxChargeVoltage"] == pytest.approx(57.65)
+        assert values["/Info/MaxChargeVoltage"] == pytest.approx(57.6)

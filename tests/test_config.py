@@ -35,7 +35,7 @@ class TestExampleConfig:
         assert config.battery_ports == (BatteryPortConfig(device="/dev/ttyUSB0", pack_addresses=(1, 2, 3), require_direct_connection=False),)
         assert config.shunt_port == "/dev/ttySH"
         assert config.cell_voltage.float_volts == pytest.approx(3.325)
-        assert config.charge_stage.cvl_charger_offset_volts == pytest.approx(0.05)
+        assert config.charge_stage.full_detection_tolerance_volts == pytest.approx(0.08)
         assert config.charge_limit.max_amps == pytest.approx(10.0)
         assert config.charge_limit.cell_voltage_curve.fraction_at(3.375) == pytest.approx(1.0)
         assert config.discharge_limit.cell_voltage_curve.fraction_at(2.709) == pytest.approx(0.0)

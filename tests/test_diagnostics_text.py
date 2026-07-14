@@ -40,8 +40,8 @@ class TestDiagnosticsText:
         later_inputs = BankInputs(packs=make_packs(taken_at=1050.0, cell_voltages_volts=(3.61,) * 16, soc_percent=97.0), shunt=make_shunt(taken_at=1050.0))
         values, _ = rendered(later_inputs, state=state, now=1051.0)
         float_text = values["/Info/ChargeModeDebugFloat"]
-        assert "pack-1: sum 57.76/57.60 V" in float_text
-        assert "hold: 50/120 s" in float_text
+        assert "pack-1: sum 57.76/57.52 V" in float_text
+        assert "hold: 50/300 s" in float_text
 
     def test_float_requirements_before_the_hold_starts(self):
         values, _ = rendered()

@@ -72,7 +72,8 @@ def step_charge_stage(
 
     pack_cell_sums = [sum(pack.cell_voltages_volts) for pack in packs]
     pack_cell_diffs = [pack.max_cell_voltage_volts() - pack.min_cell_voltage_volts() for pack in packs]
-    bank_full = all(cell_sum >= max_voltage for cell_sum in pack_cell_sums)
+    full_voltage = max_voltage - stage_config.full_detection_tolerance_volts
+    bank_full = all(cell_sum >= full_voltage for cell_sum in pack_cell_sums)
     bank_balanced = all(diff <= stage_config.balanced_cell_diff_volts for diff in pack_cell_diffs)
     any_pack_sagged = any(cell_sum < max_voltage - ABSORPTION_EXIT_VOLTAGE_SAG_VOLTS for cell_sum in pack_cell_sums)
     any_pack_unbalanced_beyond_margin = any(

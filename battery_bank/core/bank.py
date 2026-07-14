@@ -89,7 +89,7 @@ class BankDecision:
     keeps the D-Bus services unregistered (or their control values unpublished) while False,
     so a restarting service never momentarily commands the inverter to stop."""
     cvl_volts: float | None
-    """None until the bank controlled at least once; the charger offset is added at publishing."""
+    """None until the bank controlled at least once; published as-is (the true charge target)."""
     ccl_amps: float
     dcl_amps: float
     allow_to_charge: bool

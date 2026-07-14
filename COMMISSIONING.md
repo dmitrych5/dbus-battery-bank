@@ -43,7 +43,8 @@ the switch permanent; no rollback rehearsal.
 - [ ] `dbus-spy`: aggregate service (`com.victronenergy.battery.aggregate`, instance 99) plus
       one service per pack, with the packs' previous DeviceInstances reclaimed.
 - [ ] CVL/CCL/DCL on the aggregate match what the old stack published in the same conditions
-      (CVL including the charger offset; CCL/DCL = per-pack limit × pack count).
+      (CVL is the true charge target, without the old stack's VOLTAGE_DROP offset;
+      CCL/DCL = per-pack limit × pack count).
 - [ ] DVCC uses the aggregate as the battery monitor; the Multi follows the published limits.
 - [ ] SoC, current, and consumed Ah come from the shunt (compare against the shunt's own
       values); voltage is the pack average.

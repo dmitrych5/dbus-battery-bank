@@ -67,10 +67,11 @@ class ChargeStageConfig:
     """Exceeding balanced_cell_diff_volts by this margin restarts the absorption hold timer."""
     rebulk_soc_percent: float
     """SoC below which the bank leaves Float and returns to Bulk."""
-    cvl_charger_offset_volts: float
-    """Added to the published CVL so the charger drives the BMS-measured voltage up to the
-    charge-stage target. Exists because the absorption->float decision does not yet model the
-    balancer's cell-voltage cutoff; retired by roadmap phase 2 in CLAUDE.md."""
+    full_detection_tolerance_volts: float
+    """A pack counts as full when its cell-voltage sum is within this tolerance below the
+    charge-stage target. The charger regulates CVL at its own voltage sense, which reads a few
+    tens of mV apart from the BMS, so the BMS-measured sum plateaus below the target and an
+    exact comparison would never be satisfied. Must exceed that steady-state gap with margin."""
 
 
 @dataclass(frozen=True)
@@ -284,7 +285,7 @@ def load_config(path: Path) -> Config:
         balanced_cell_diff_volts=reader.get_float("charge_stage", "balanced_cell_diff_volts"),
         balanced_cell_diff_restart_margin_volts=reader.get_float("charge_stage", "balanced_cell_diff_restart_margin_volts"),
         rebulk_soc_percent=reader.get_float("charge_stage", "rebulk_soc_percent"),
-        cvl_charger_offset_volts=reader.get_float("charge_stage", "cvl_charger_offset_volts"),
+        full_detection_tolerance_volts=reader.get_float("charge_stage", "full_detection_tolerance_volts"),
     )
     cvl_controller = CvlControllerConfig(
         volts_per_volt_second=reader.get_float("cvl_controller", "volts_per_volt_second"),

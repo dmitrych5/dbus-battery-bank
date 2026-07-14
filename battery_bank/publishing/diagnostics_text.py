@@ -65,8 +65,7 @@ def diagnostics_values(
 
 def _overview_text(config: Config, decision: BankDecision, packs: Sequence[BatterySnapshot], shunt: ShuntSnapshot | None) -> str:
     lines = [
-        f"stage: {decision.charge_stage.value} • CVL: {_fmt(decision.cvl_volts, '{:.3f} V')}"
-        f" (+{config.charge_stage.cvl_charger_offset_volts:.2f} V charger offset)",
+        f"stage: {decision.charge_stage.value} • CVL: {_fmt(decision.cvl_volts, '{:.3f} V')}",
         f"CCL: {decision.ccl_amps:.1f} A • DCL: {decision.dcl_amps:.1f} A",
         f"SoC: {_fmt(decision.soc_percent, '{:.1f}%')} ({decision.soc_source.value})"
         f" • current: {_fmt(decision.current_amps, '{:.2f} A')}",
@@ -89,10 +88,10 @@ def _overview_text(config: Config, decision: BankDecision, packs: Sequence[Batte
 
 
 def _float_requirements_text(config: Config, state: ControlState, packs: Sequence[BatterySnapshot], now_monotonic: float) -> str:
-    max_voltage = config.cells_per_pack * config.cell_voltage.max_volts
     stage_config = config.charge_stage
+    full_voltage = config.cells_per_pack * config.cell_voltage.max_volts - stage_config.full_detection_tolerance_volts
     pack_lines = [
-        f"{pack.identity.unique_id}: sum {sum(pack.cell_voltages_volts):.2f}/{max_voltage:.2f} V"
+        f"{pack.identity.unique_id}: sum {sum(pack.cell_voltages_volts):.2f}/{full_voltage:.2f} V"
         f" • diff {pack.max_cell_voltage_volts() - pack.min_cell_voltage_volts():.3f}"
         f"/{stage_config.balanced_cell_diff_volts:.3f} V"
         for pack in packs

@@ -344,7 +344,9 @@ repeated failures escalate to Report & restart.
 - Validation failures: start in error state, publish the config alarm so VRM notifies, do not
   control anything. Never silently substitute values.
 - Each option has exactly one meaning. Options that existed only to work around old behavior are
-  not carried over (see VOLTAGE_DROP under Roadmap).
+  not carried over (e.g. the old stack's VOLTAGE_DROP actuation offset became
+  `full_detection_tolerance_volts`, which states the real meaning: the published CVL is the true
+  charge target, and a pack counts as full when its cell sum is within the tolerance of it).
 
 ## Testing
 
@@ -385,15 +387,13 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
 
 ## Roadmap
 
-1. **Balancer-aware float switch**: model the balancer's cell-voltage cutoff in the
-   absorption→float decision so charging reliably completes, and retire the VOLTAGE_DROP offset.
-2. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
+1. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
    information once all packs are polled in-process; drop if provably redundant. Likewise
    revisit `require_direct_connection` — it was a workaround for the old per-battery driver
    instances being unable to coordinate when some packs were unreachable; with all packs in one
    process, direct-connection detection can likely be automatic (probe IndividualPackStatus)
    instead of configured.
-3. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
+2. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
    temperature at roughly the same time of day yesterday resembles today better than a
    many-hours-old state from today. Idea to explore: every few hours persist per-hour data
    points for the last ~25 hours (25 so the current time of day exists for both today and
@@ -419,8 +419,15 @@ Next tasks, in priority order:
    WASM rebuild and deploy, check the aggregate's and packs' History pages fill in, the
    restructured main battery page reads well, the trip-reset button appears when a trip is
    latched, and that `state.json` grows its history blocks without excessive write churn.
-2. Roadmap items below (balancer-aware float switch retiring `cvl_charger_offset_volts`,
-   diurnal thermal restore, master-limit/`require_direct_connection` simplifications).
+2. **Verify the tolerance-based full detection on the device**: the float switch now compares
+   each pack's cell sum against the target minus `full_detection_tolerance_volts` and the
+   published CVL no longer carries the charger offset — watch the first full charge cycle
+   after deploy to confirm the bank still reaches Float, and check the steady-state gap
+   between the published CVL and the BMS-measured sum leaves real margin within the 0.08 V
+   tolerance. The device `config.ini` must be updated at deploy time (the option rename and
+   `absorption_hold_seconds = 300`), or the service starts in config-error state.
+3. Roadmap items below (diurnal thermal restore, master-limit/`require_direct_connection`
+   simplifications).
 
 ## Decided details
 
