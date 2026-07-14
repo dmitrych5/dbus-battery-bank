@@ -342,7 +342,9 @@ Page {
 								width: parent.width
 								value: socItem.value ?? NaN
 								unit: VenusOS.Units_Percentage
-								precision: 2
+								// Units.getDisplayText clips two-digit values to 1 decimal unless
+								// the requested precision is >= 3, which it maps to exactly 2.
+								precision: 3
 								font.pixelSize: 22
 							}
 
