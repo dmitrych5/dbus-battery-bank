@@ -106,27 +106,7 @@ class PackPoller:
             )
             self._identities[address] = PackIdentity(unique_id=unique_id, port=self._port_config.device, address=address)
             logger.info("Discovered pack %s at %s address %d", unique_id, self._port_config.device, address)
-            self._log_raw_window(address)
         return dict(self._infos)
-
-    def _log_raw_window(self, address: int) -> None:
-        """One-shot diagnostic dump of the undocumented raw status window (see
-        transport.up16s_raw_window): logged at discovery so its decode can be validated
-        offline against the proven commands before the window is trusted for anything.
-        A failure only costs the dump; discovery has already succeeded."""
-        registers: list[int] = []
-        for part in up16s_raw_window.WINDOW_PARTS:
-            chunk = self._send(address, part)
-            if chunk is None:
-                logger.warning("Battery %d: no answer for raw window %s", address, part.__name__)
-                break
-            registers.extend(chunk.registers)
-            if len(chunk.registers) != part.MODBUS_ADDR_LEN:
-                # A short part would shift every later register under the wrong label.
-                logger.warning("Battery %d: %s returned %d registers instead of %d", address, part.__name__, len(chunk.registers), part.MODBUS_ADDR_LEN)
-                break
-        if registers:
-            logger.info("Battery %d raw status window (%d registers):\n%s", address, len(registers), up16s_raw_window.describe_window(registers))
 
     def poll(self) -> list[BatterySnapshot]:
         """One pass over the discovered packs. A pack that fails to answer simply yields no
@@ -161,21 +141,55 @@ class PackPoller:
                     self._temperature_counts[address],
                 )
                 continue
-            params2 = self._send_optional(address, up16s.PackParams2)
-            individual_status = self._send_optional(address, up16s.IndividualPackStatus) if address == MASTER_ADDRESS else None
+            raw_status = self._validated_raw_status(address, status)
+            if raw_status is not None:
+                # The raw window covers everything PackParams2 (high-res SoC) and
+                # IndividualPackStatus (the master's own limits) would add — except lifetime
+                # discharge, which is deliberately left unfetched then.
+                params2 = None
+                individual_status = None
+            else:
+                params2 = self._send_optional(address, up16s.PackParams2)
+                individual_status = self._send_optional(address, up16s.IndividualPackStatus) if address == MASTER_ADDRESS else None
 
             snapshot = assemble_snapshot(
                 identity,
                 status,
+                raw_status,
                 params2,
                 individual_status,
-                params2_known_available=self._availability.status(address, up16s.PackParams2) is AvailabilityStatus.AVAILABLE,
+                high_res_soc_known_available=self._high_res_soc_known_available(address),
                 previous_soc_percent=self._previous_soc.get(address),
                 now_monotonic=self._clock(),
             )
             self._previous_soc[address] = snapshot.soc_percent
             snapshots.append(snapshot)
         return snapshots
+
+    def _validated_raw_status(self, address: int, status: up16s.PackStatus) -> up16s_raw_window.RawStatus | None:
+        """The undocumented raw status window must keep proving itself on every read: the
+        first response that fails validation against the same cycle's PackStatus (or its own
+        internal invariants) disables the command on this battery until restart. See
+        transport.up16s_raw_window."""
+        raw_status = self._send_optional(address, up16s_raw_window.RawStatus)
+        if raw_status is None:
+            return None
+        failures = up16s_raw_window.validate(raw_status, status, address)
+        if failures:
+            self._availability.mark_unavailable(address, up16s_raw_window.RawStatus)
+            logger.error(
+                "Battery %d raw status window failed validation; falling back to the documented commands until restart:\n%s",
+                address,
+                "\n".join(failures),
+            )
+            return None
+        return raw_status
+
+    def _high_res_soc_known_available(self, address: int) -> bool:
+        return any(
+            self._availability.status(address, command) is AvailabilityStatus.AVAILABLE
+            for command in (up16s_raw_window.RawStatus, up16s.PackParams2)
+        )
 
     def request_soc_reset(self, unique_id: str, soc_percent: float) -> bool:
         """Queues a SoC write for the next poll. SetSoc availability is learned from its own

@@ -16,8 +16,8 @@ MAX_AVAILABILITY_RETRIES = 5
 
 class AvailabilityStatus(Enum):
     UNKNOWN = "unknown"  # will retry until MAX_AVAILABILITY_RETRIES
-    AVAILABLE = "available"  # answered at least once; no further availability determination
-    UNAVAILABLE = "unavailable"  # never answered after all retries; not sent anymore
+    AVAILABLE = "available"  # answered at least once; revoked only by mark_unavailable
+    UNAVAILABLE = "unavailable"  # never answered after all retries, or failed semantic validation; not sent anymore
 
 
 @dataclass
@@ -42,6 +42,11 @@ class CommandAvailabilityTracker:
         newly_available = record.status is not AvailabilityStatus.AVAILABLE
         record.status = AvailabilityStatus.AVAILABLE
         return newly_available
+
+    def mark_unavailable(self, address: int, command: type) -> None:
+        """Immediately disables a command regardless of past successes — for responses that
+        parse fine but fail semantic validation (the raw status window's cross-checks)."""
+        self._record(address, command).status = AvailabilityStatus.UNAVAILABLE
 
     def record_failure(self, address: int, command: type) -> bool:
         """Counts a failed attempt that was not caused by temporary serial interference from

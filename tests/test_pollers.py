@@ -9,6 +9,7 @@ from battery_bank.acquisition.battery_poller import MAX_SET_SOC_RETRIES, PackPol
 from battery_bank.acquisition.shunt_poller import ShuntPoller
 from battery_bank.config import BatteryPortConfig
 from battery_bank.transport import up16s, up16s_raw_window
+from tests.factories import make_raw_status_registers, raw_status_payload
 from tests.test_up16s import response_frame
 from tests.test_vedirect import HISTORY_FIELDS, SHUNT_FIELDS, frame_bytes
 
@@ -16,8 +17,19 @@ PORT = "/dev/ttyUSB0"
 
 
 def pack_status_payload(serial_number=b"SN-1", rated_capacity=10500, cell_voltages=(3301, 3302, 3303, 3304), temperatures=(700, 705)):
+    """Consistent with tests.factories.make_raw_status_registers, so raw-window validation
+    passes against it."""
     prefix = [0] * 30
+    prefix[0] = 1321  # pack voltage: 13.21 V, the sum of the default cells
+    prefix[2] = 299500  # -5 A
+    prefix[3] = 8000  # SoC 80%
+    prefix[4] = 8000  # remaining capacity
+    prefix[5] = 10000  # full capacity
     prefix[6] = rated_capacity
+    prefix[7] = 750  # MOSFET temperature
+    prefix[8] = 800  # ambient temperature
+    prefix[26], prefix[27] = 552, 100  # CVL, CCL
+    prefix[28], prefix[29] = 443, 2500  # DVL, DCL
     payload = up16s.PackStatus.PREFIX_STRUCT.pack(*prefix)
     payload += pack(f">H{len(cell_voltages)}H", len(cell_voltages), *cell_voltages)
     payload += pack(f">H{len(temperatures)}H", len(temperatures), *temperatures)
@@ -72,9 +84,9 @@ def script_full_pack(link, address, repeat=1):
     link.respond(address, up16s.ProductInformation, product_information_payload())
 
 
-def script_raw_window(link, address):
-    for part in up16s_raw_window.WINDOW_PARTS:
-        link.respond(address, part, pack(f">{part.MODBUS_ADDR_LEN}H", *[0] * part.MODBUS_ADDR_LEN))
+def script_raw_status(link, address, registers=None):
+    registers = registers if registers is not None else make_raw_status_registers(address)
+    link.respond(address, up16s_raw_window.RawStatus, raw_status_payload(registers))
 
 
 class TestDiscovery:
@@ -129,28 +141,6 @@ class TestDiscovery:
         infos = make_poller(link, addresses=(1,), cells_per_pack=16).discover()
         assert infos == {}
 
-    def test_discovery_logs_the_raw_window_dump_once(self, caplog):
-        link = FakeLink()
-        script_full_pack(link, 1)
-        script_raw_window(link, 1)
-        poller = make_poller(link, addresses=(1,))
-        with caplog.at_level(logging.INFO):
-            poller.discover()
-            poller.discover()
-        part1_request = up16s.build_request(1, up16s_raw_window.RawWindowPart1)
-        assert link.requests.count(part1_request) == 1
-        assert caplog.text.count("raw status window") == 1
-        assert "pack voltage" in caplog.text
-
-    def test_raw_window_failure_does_not_affect_discovery(self, caplog):
-        link = FakeLink()
-        script_full_pack(link, 1)  # no raw-window responses scripted: every chunk times out
-        with caplog.at_level(logging.INFO):
-            infos = make_poller(link, addresses=(1,)).discover()
-        assert 1 in infos
-        assert "raw status window" not in caplog.text
-
-
 class TestPolling:
     def discovered_poller(self, link, addresses=(1, 2)):
         for address in addresses:
@@ -170,6 +160,62 @@ class TestPolling:
         assert by_address[1].chain_aggregated_limits is not None
         assert by_address[1].bms_limits.charge_current_amps == pytest.approx(12.0)
         assert by_address[2].chain_aggregated_limits is None
+
+    def test_valid_raw_status_supersedes_params2_and_individual_status(self):
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(1,))
+        link.respond(1, up16s.PackStatus, pack_status_payload())
+        registers = make_raw_status_registers(1)
+        registers[0x02] = 29450  # pre-deadband -5.5 A, distinct from the -5 A deadbanded reading
+        registers[0x31] = 8050
+        script_raw_status(link, 1, registers)
+        snapshot = poller.poll()[0]
+        assert snapshot.current_amps == pytest.approx(-5.5)
+        assert snapshot.soc_percent == pytest.approx(80.5)
+        assert up16s.build_request(1, up16s.PackParams2) not in link.requests
+        assert up16s.build_request(1, up16s.IndividualPackStatus) not in link.requests
+
+    def test_invalid_raw_status_disables_it_until_restart_and_falls_back(self, caplog):
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(2,))
+        registers = make_raw_status_registers(2)
+        registers[0x52] = 9  # claims to be another battery
+        link.respond(2, up16s.PackStatus, pack_status_payload())
+        script_raw_status(link, 2, registers)
+        with caplog.at_level(logging.ERROR):
+            snapshots = poller.poll()
+        assert len(snapshots) == 1
+        assert "failed validation" in caplog.text
+        assert "says 9" in caplog.text and "addressed to 2" in caplog.text
+        assert up16s.build_request(2, up16s.PackParams2) in link.requests  # fallback within the same cycle
+        link.respond(2, up16s.PackStatus, pack_status_payload())
+        script_raw_status(link, 2)  # a valid response is scripted, but must not even be requested
+        poller.poll()
+        assert link.requests.count(up16s.build_request(2, up16s_raw_window.RawStatus)) == 1
+
+    def test_raw_status_becomes_unavailable_after_repeated_timeouts(self):
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(2,))
+        raw_status_request = up16s.build_request(2, up16s_raw_window.RawStatus)
+        for _ in range(MAX_AVAILABILITY_RETRIES + 2):
+            link.respond(2, up16s.PackStatus, pack_status_payload())
+            poller.poll()
+        assert link.requests.count(raw_status_request) == MAX_AVAILABILITY_RETRIES
+
+    def test_transient_raw_status_loss_falls_back_and_holds_the_high_res_soc(self):
+        link = FakeLink()
+        poller = self.discovered_poller(link, addresses=(2,))
+        link.respond(2, up16s.PackStatus, pack_status_payload())
+        registers = make_raw_status_registers(2)
+        registers[0x31] = 8050
+        script_raw_status(link, 2, registers)
+        assert poller.poll()[0].soc_percent == pytest.approx(80.5)
+        # The raw status read times out this cycle: PackParams2 is tried as the fallback,
+        # and the high-res SoC is held because its source is known to be available.
+        link.respond(2, up16s.PackStatus, pack_status_payload())
+        snapshot = poller.poll()[0]
+        assert snapshot.soc_percent == pytest.approx(80.5)
+        assert up16s.build_request(2, up16s.PackParams2) in link.requests
 
     def test_snapshot_with_deviating_counts_is_dropped(self):
         """Publishing fixes per-cell and per-sensor D-Bus paths from the first snapshot; a

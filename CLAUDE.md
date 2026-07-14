@@ -371,9 +371,9 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
 - The master (address 0x01) returns **aggregated** CCL/DCL/CVL/DVL in PackStatus;
   IndividualPackStatus (function 0x45) retrieves its own non-aggregated CCL/DCL and only works on
   a direct connection. Bank logic uses `min(per-pack, master-aggregated)` for current limits.
-- Slave SoC via the master is whole-percent; PackParams2 provides hi-res SoC. When PackParams2
-  times out transiently, keep the last hi-res SoC unless it diverges >1% from PackStatus SoC
-  (prevents SoC flapping on unstable links).
+- Slave SoC via the master is whole-percent; the raw status window (preferred) and PackParams2
+  provide hi-res SoC. When the hi-res source times out transiently, keep the last hi-res SoC
+  unless it diverges >1% from PackStatus SoC (prevents SoC flapping on unstable links).
 - SetSoc availability must be learned from its own write attempts, never inferred from
   PackParams2: PackParams2 can be unavailable merely because its partial-read request format is
   ignored by firmware < ~v12, while the plain SetSoc write on the same registers still works.
@@ -384,14 +384,21 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
   capacity in identity fallbacks because full capacity gets recalculated by the BMS.
 - PackStatus carries `ambient_temp` — used for ambient-temperature current limiting and UI.
 - Auto SoC reset at charge completion is only effective with certain cabling configurations.
-- An **undocumented raw status window** (0x78 at 0x3000+, see `docs/up16s-raw-window.md`)
-  reads the BMS status array directly and bypasses the master's ~50 s cache of slave state —
-  the only known way to get fresh slave data every cycle. It is UNTRUSTED until validated
-  against the proven commands (the docs file records the validation strategy); its encodings
-  differ from the serialized commands for the same quantities (current offset 30000, not
-  300000; 0xF6 is deci-Kelvin), and the protection/warning bitmasks are NOT in the window.
-  Currently only dumped to the log once per pack at discovery
-  (`transport/up16s_raw_window.py`).
+- An **undocumented raw status window** (0x78 at 0x3000+, documented from firmware reverse
+  engineering in `../up16s_protocol_docs/ecoworthy.md`, "Raw status registers") reads the BMS
+  live-data array directly, bypassing the master's ~50 s cache of slave state — the only
+  known way to get fresh slave data every cycle — and carries the pre-deadband pack current
+  (register 0x02), published as the pack current. `transport/up16s_raw_window.py` reads the
+  per-pack block (registers 0x02–0x52) as the `RawStatus` command; being undocumented, it
+  must keep proving itself: every response is validated against internal invariants and the
+  same cycle's PackStatus, with tolerances sized so slave-cache staleness can never
+  false-alarm (volatile quantities — current, limits, FET/balancing/operation state — are
+  deliberately not cross-checked). The first validation failure disables the command for
+  that battery until restart, falling back to the documented commands. While RawStatus data
+  is in use, PackParams2 and IndividualPackStatus are skipped (the window carries hi-res SoC
+  and the master's own limits; lifetime discharge then stays unfetched). The
+  protection/warning bitmasks are NOT in the window — PackStatus remains the alarm source.
+  Encodings differ from the serialized commands (current offset 30000, not 300000).
 
 ## Roadmap
 

@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from battery_bank.acquisition.availability import (
@@ -7,75 +9,24 @@ from battery_bank.acquisition.availability import (
 )
 from battery_bank.acquisition.snapshots import assemble_snapshot, build_unique_id, select_soc_percent
 from battery_bank.core.values import AlarmSeverity, PackIdentity
-from battery_bank.transport.up16s import IndividualPackStatus, PackParams2, PackStatus
-
-
-def make_pack_status(
-    soc=8000,
-    charge_current_limit=100,
-    discharge_current_limit=2500,
-    mosfet_flags=0b11,
-    fault_flags=0,
-    cell_voltages=(3301, 3302, 3303, 3304),
-    cell_balancing_flags=0b0011,
-):
-    return PackStatus(
-        pack_voltage=5300,
-        unknown1=0,
-        current=299500,
-        soc=soc,
-        remaining_capacity=8000,
-        full_capacity=10000,
-        rated_capacity=10500,
-        mosfet_temp=750,
-        ambient_temp=800,
-        operation_status=0,
-        soh=100,
-        fault_flags=fault_flags,
-        alarm_flags=0,
-        mosfet_flags=mosfet_flags,
-        connection_state_flags=0,
-        charge_cycles=42,
-        max_v_cell_num=4,
-        max_cell_voltage=3304,
-        min_v_cell_num=1,
-        min_cell_voltage=3301,
-        avg_cell_voltage=3302,
-        max_t_sensor_num=1,
-        max_cell_temp=700,
-        min_t_sensor_num=2,
-        min_cell_temp=695,
-        avg_cell_temp=698,
-        maximum_charge_voltage=552,
-        charge_current_limit=charge_current_limit,
-        minimum_discharge_voltage=443,
-        discharge_current_limit=discharge_current_limit,
-        cell_count=len(cell_voltages),
-        cell_voltages=cell_voltages,
-        temperatures_count=2,
-        temperatures=(700, 695),
-        unknown2=0,
-        cell_balancing_flags=cell_balancing_flags,
-        firmware_version=0x0C01,
-        pack_serial_number=b"SN-1".ljust(30, b"\x00"),
-    )
-
-
-def make_params2(high_res_soc=8123, total_discharge=12345):
-    return PackParams2(high_res_soc=high_res_soc, unused=b"\x00" * 8, total_charge=20000, total_discharge=total_discharge)
+from battery_bank.transport.up16s import IndividualPackStatus, PackParams2
+from tests.factories import make_pack_status, make_params2, make_raw_status
 
 
 def identity(address=2):
     return PackIdentity(unique_id=f"pack-{address}", port="/dev/ttyUSB0", address=address)
 
 
-def snapshot(address=2, pack_status=None, params2=None, individual_status=None, params2_known_available=False, previous_soc=None):
+def snapshot(
+    address=2, pack_status=None, raw_status=None, params2=None, individual_status=None, high_res_soc_known_available=False, previous_soc=None
+):
     return assemble_snapshot(
         identity(address),
         pack_status if pack_status is not None else make_pack_status(),
+        raw_status,
         params2,
         individual_status,
-        params2_known_available,
+        high_res_soc_known_available,
         previous_soc,
         now_monotonic=1000.0,
     )
@@ -84,7 +35,7 @@ def snapshot(address=2, pack_status=None, params2=None, individual_status=None, 
 class TestAssembleSnapshot:
     def test_converts_measurements_to_engineering_units(self):
         result = snapshot(params2=make_params2())
-        assert result.voltage_volts == pytest.approx(53.0)
+        assert result.voltage_volts == pytest.approx(13.21)
         assert result.current_amps == pytest.approx(-5.0)
         assert result.full_capacity_ah == pytest.approx(100.0)
         assert result.cell_voltages_volts == (3.301, 3.302, 3.303, 3.304)
@@ -120,21 +71,62 @@ class TestAssembleSnapshot:
         assert result.chain_aggregated_limits is not None
         assert result.bms_limits.charge_current_amps == pytest.approx(10.0)
 
+    def test_raw_status_supplies_the_live_readings(self):
+        raw = replace(
+            make_raw_status(),
+            raw_current=29450,
+            pack_voltage=1350,
+            soc=8123,
+            residual_capacity=8100,
+            mosfet_temp=760,
+            ambient_temp=810,
+            cell_balancing_flags=0b0100,
+            mosfet_state=0b01,
+        )
+        result = snapshot(raw_status=raw)
+        assert result.current_amps == pytest.approx(-5.5)  # the pre-deadband register, not PackStatus's -5.0
+        assert result.voltage_volts == pytest.approx(13.50)
+        assert result.soc_percent == pytest.approx(81.23)
+        assert result.remaining_capacity_ah == pytest.approx(81.0)
+        assert result.mosfet_temperature_celsius == pytest.approx(26.0)
+        assert result.ambient_temperature_celsius == pytest.approx(31.0)
+        assert result.cell_voltages_volts == (3.301, 3.302, 3.303, 3.304)
+        assert result.cell_temperatures_celsius == (20.0, 19.5)
+        assert result.cells_balancing == (False, False, True, False)
+        # The window's bit order is the opposite of PackStatus's: bit 0 is the charge MOS.
+        assert result.charge_fet_enabled is True
+        assert result.discharge_fet_enabled is False
+        assert result.total_discharge_ah is None
+
+    def test_raw_status_limits_are_the_packs_own_even_on_the_master(self):
+        raw = replace(make_raw_status(), charge_current_limit=120, discharge_current_limit=2000)
+        result = snapshot(address=1, raw_status=raw)
+        assert result.bms_limits.charge_current_amps == pytest.approx(12.0)
+        assert result.bms_limits.discharge_current_amps == pytest.approx(200.0)
+        # PackStatus stays the source of the chain-aggregated limits.
+        assert result.chain_aggregated_limits.charge_current_amps == pytest.approx(10.0)
+
+    def test_raw_status_slices_the_fixed_slots_to_the_pack_counts(self):
+        result = snapshot(raw_status=make_raw_status())
+        assert len(result.cell_voltages_volts) == 4
+        assert len(result.cells_balancing) == 4
+        assert len(result.cell_temperatures_celsius) == 2
+
 
 class TestSocSelection:
     def test_high_res_soc_wins_when_available(self):
-        assert select_soc_percent(make_pack_status(), make_params2(high_res_soc=8123), True, previous_soc_percent=75.0) == pytest.approx(81.23)
+        assert select_soc_percent(make_pack_status(), 8123, True, previous_soc_percent=75.0) == pytest.approx(81.23)
 
-    def test_transient_params2_loss_keeps_previous_soc(self):
-        soc = select_soc_percent(make_pack_status(soc=8000), None, params2_known_available=True, previous_soc_percent=80.5)
+    def test_transient_high_res_loss_keeps_previous_soc(self):
+        soc = select_soc_percent(make_pack_status(soc=8000), None, high_res_soc_known_available=True, previous_soc_percent=80.5)
         assert soc == pytest.approx(80.5)
 
     def test_large_divergence_falls_back_to_pack_status_soc(self):
-        soc = select_soc_percent(make_pack_status(soc=8000), None, params2_known_available=True, previous_soc_percent=85.0)
+        soc = select_soc_percent(make_pack_status(soc=8000), None, high_res_soc_known_available=True, previous_soc_percent=85.0)
         assert soc == pytest.approx(80.0)
 
-    def test_unavailable_params2_uses_pack_status_soc(self):
-        soc = select_soc_percent(make_pack_status(soc=8000), None, params2_known_available=False, previous_soc_percent=80.5)
+    def test_unavailable_high_res_source_uses_pack_status_soc(self):
+        soc = select_soc_percent(make_pack_status(soc=8000), None, high_res_soc_known_available=False, previous_soc_percent=80.5)
         assert soc == pytest.approx(80.0)
 
 
@@ -169,6 +161,12 @@ class TestAvailabilityTracker:
         for _ in range(MAX_AVAILABILITY_RETRIES + 1):
             tracker.record_failure(1, PackParams2)
         assert tracker.status(1, PackParams2) is AvailabilityStatus.AVAILABLE
+
+    def test_mark_unavailable_revokes_availability(self):
+        tracker = CommandAvailabilityTracker()
+        tracker.record_success(1, PackParams2)
+        tracker.mark_unavailable(1, PackParams2)
+        assert tracker.should_send(1, PackParams2) is False
 
     def test_addresses_are_tracked_independently(self):
         tracker = CommandAvailabilityTracker()
