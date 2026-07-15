@@ -474,7 +474,14 @@ Next tasks, in priority order:
   (GUI/VRM reads, the trip-reset write) wait, SIGTERM handling is delayed, and the shunt is not
   read — its 30 s staleness budget absorbs realistic stalls. Interference is rare outside the
   first minute after service start (udev keeps serial-starter off the ports), and with one
-  port the bounds are acceptable; but worst-case stalls stack linearly with added ports. If it
-  ever bites: thread the pollers behind the immutable-snapshot handoff (the architecture
-  already isolates them for exactly this), and/or shorten the discovery interference wait.
-  Deliberately not decided yet; revisit before adding a second battery port.
+  port the bounds are acceptable; but worst-case stalls stack linearly with added ports.
+  **It already bit once**: the raw status window's live slave reads pushed the cycle past the
+  1 s timer interval, the permanently-overdue repeating timer left the loop no idle time, and
+  starved D-Bus method dispatch (~23 s per call) made vrmlogger's 25 s scans time out — the
+  pack services silently vanished from VRM while signals (Cerbo UI) kept flowing. Mitigated
+  by re-arming the cycle one-shot after completion (`_schedule_cycle`), which bounds D-Bus
+  latency to about one cycle at the cost of the cadence becoming interval + cycle duration
+  (~3.5 s today). The real fix stays: thread the pollers (one thread per port — packs on a
+  shared port remain strictly sequential) behind the immutable-snapshot handoff, restoring
+  the 1 s cadence; do this before adding a second battery port, or sooner if the slower
+  cadence bothers.

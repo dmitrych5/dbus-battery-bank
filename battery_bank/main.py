@@ -89,7 +89,7 @@ class BatteryBankService:
 
     def run(self) -> None:
         self._discover()
-        GLib.timeout_add_seconds(POLL_INTERVAL_SECONDS, self._cycle)
+        self._schedule_cycle()
         GLib.timeout_add_seconds(DISCOVERY_RETRY_SECONDS, self._discover)
         signal.signal(signal.SIGTERM, lambda *_: self._mainloop.quit())
         signal.signal(signal.SIGINT, lambda *_: self._mainloop.quit())
@@ -124,6 +124,15 @@ class BatteryBankService:
         # about the incomplete picture once the startup grace expires.
         return len(self._pack_infos) < expected
 
+    def _schedule_cycle(self) -> None:
+        """One-shot scheduling, re-armed after each completed cycle — never a repeating
+        timer: a cycle's blocking serial I/O can exceed POLL_INTERVAL_SECONDS, and a
+        permanently-overdue repeating timer leaves the GLib loop no idle time, starving
+        incoming D-Bus method calls (vrmlogger's device scan then times out and skips the
+        services, silently dropping them from VRM). Re-arming after completion guarantees an
+        idle window every cycle, bounding D-Bus latency to about one cycle."""
+        GLib.timeout_add_seconds(POLL_INTERVAL_SECONDS, self._cycle)
+
     def _cycle(self) -> bool:
         try:
             self._cycle_inner()
@@ -138,7 +147,9 @@ class BatteryBankService:
                 if self._aggregate_service is not None:
                     self._aggregate_service.set_error(VICTRON_STATE_ERROR, 0)
                 self._mainloop.quit()
-        return True
+                return False
+        self._schedule_cycle()
+        return False
 
     def _cycle_inner(self) -> None:
         for poller in self._pack_pollers:
