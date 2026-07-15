@@ -134,22 +134,35 @@ class BatteryBankService:
         GLib.timeout_add_seconds(POLL_INTERVAL_SECONDS, self._cycle)
 
     def _cycle(self) -> bool:
+        keep_running = True
         try:
             self._cycle_inner()
             self._consecutive_cycle_failures = 0
         except Exception:
-            logger.exception("Cycle failed")
-            self._consecutive_cycle_failures += 1
-            if self._consecutive_cycle_failures >= CYCLE_FAILURES_BEFORE_ALARM:
-                self._service_internal_alarm = True
-            if self._consecutive_cycle_failures >= MAX_CONSECUTIVE_CYCLE_FAILURES:
-                logger.error("%d consecutive cycle failures; exiting for the supervisor to restart", self._consecutive_cycle_failures)
-                if self._aggregate_service is not None:
-                    self._aggregate_service.set_error(VICTRON_STATE_ERROR, 0)
-                self._mainloop.quit()
-                return False
-        self._schedule_cycle()
+            keep_running = self._handle_cycle_failure()
+        finally:
+            # Re-armed in `finally` so that even an exception escaping the failure handling
+            # itself (say, set_error on a dying bus) cannot end the cycling: a missed re-arm
+            # would leave the process half-alive forever, which the error taxonomy forbids.
+            if keep_running:
+                self._schedule_cycle()
         return False
+
+    def _handle_cycle_failure(self) -> bool:
+        """Returns False only after a deliberate shutdown: report & restart via the
+        supervisor. If the error-state publishing raises, the cycle stays armed and this
+        runs again next cycle."""
+        logger.exception("Cycle failed")
+        self._consecutive_cycle_failures += 1
+        if self._consecutive_cycle_failures >= CYCLE_FAILURES_BEFORE_ALARM:
+            self._service_internal_alarm = True
+        if self._consecutive_cycle_failures >= MAX_CONSECUTIVE_CYCLE_FAILURES:
+            logger.error("%d consecutive cycle failures; exiting for the supervisor to restart", self._consecutive_cycle_failures)
+            if self._aggregate_service is not None:
+                self._aggregate_service.set_error(VICTRON_STATE_ERROR, 0)
+            self._mainloop.quit()
+            return False
+        return True
 
     def _cycle_inner(self) -> None:
         for poller in self._pack_pollers:
