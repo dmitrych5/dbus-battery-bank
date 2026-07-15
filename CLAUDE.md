@@ -401,25 +401,6 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
   protection/warning bitmasks are NOT in the window — PackStatus remains the alarm source.
   Encodings differ from the serialized commands (current offset 30000, not 300000).
 
-## Roadmap
-
-1. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
-   information once all packs are polled in-process; drop if provably redundant. Likewise
-   revisit `require_direct_connection` — it was a workaround for the old per-battery driver
-   instances being unable to coordinate when some packs were unreachable; with all packs in one
-   process, direct-connection detection can likely be automatic (probe IndividualPackStatus)
-   instead of configured.
-2. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
-   temperature at roughly the same time of day yesterday resembles today better than a
-   many-hours-old state from today. Idea to explore: every few hours persist per-hour data
-   points for the last ~25 hours (25 so the current time of day exists for both today and
-   yesterday); on restore, extrapolate the expected change from three known points — the first
-   and last points in the window plus the point matching the launch time of day — to
-   reconstruct a better thermal estimate than pure rate extrapolation allows.
-
-Behavior changes to proven battery-handling logic beyond this list are discussed before
-implementation.
-
 ## Current status and next steps (as of 2026-07-13)
 
 The system is commissioned and permanent: the service runs on the Cerbo, all parity checks
@@ -430,20 +411,18 @@ under Publishing).
 
 Next tasks, in priority order:
 
-1. **Verify the history module and the reworked battery pages on the device** (implemented;
-   see "History, split by data source" and the GUI-v2 QML bullet under Publishing): after a
-   WASM rebuild and deploy, check the aggregate's and packs' History pages fill in, the
-   restructured main battery page reads well, the trip-reset button appears when a trip is
-   latched, and that `state.json` grows its history blocks without excessive write churn.
-2. **Verify the tolerance-based full detection on the device**: the float switch now compares
-   each pack's cell sum against the target minus `full_detection_tolerance_volts` and the
-   published CVL no longer carries the charger offset — watch the first full charge cycle
-   after deploy to confirm the bank still reaches Float, and check the steady-state gap
-   between the published CVL and the BMS-measured sum leaves real margin within the 0.08 V
-   tolerance. The device `config.ini` must be updated at deploy time (the option rename and
-   `absorption_hold_seconds = 300`), or the service starts in config-error state.
-3. Roadmap items below (diurnal thermal restore, master-limit/`require_direct_connection`
-   simplifications).
+1. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
+   information once all packs are polled in-process; drop if provably redundant.
+2. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
+   temperature at roughly the same time of day yesterday resembles today better than a
+   many-hours-old state from today. Idea to explore: every few hours persist per-hour data
+   points for the last ~25 hours (25 so the current time of day exists for both today and
+   yesterday); on restore, extrapolate the expected change from three known points — the first
+   and last points in the window plus the point matching the launch time of day — to
+   reconstruct a better thermal estimate than pure rate extrapolation allows.
+
+Behavior changes to proven battery-handling logic beyond this list are discussed before
+implementation.
 
 ## Decided details
 
