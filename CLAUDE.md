@@ -129,10 +129,11 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
 
 ### 2. Acquisition
 
-- One poller per serial port; pollers on different ports are independent and *could* run
-  concurrently (today they run sequentially inside the main-loop cycle — see the open design
-  question on synchronous serial I/O) — immutable snapshot handoff to the control loop is the isolation boundary, so
-  adding ports never changes the control side. Snapshots are stamped with a monotonic timestamp
+- One poller per serial port, each owned by its own worker thread (`acquisition/workers.py`),
+  so no serial I/O ever runs on the GLib loop; packs sharing a port stay strictly sequential
+  on the wire. Immutable snapshot handoff (locked outboxes) to the control loop is the
+  isolation boundary, so adding ports never changes the control side; SoC resets cross back
+  as queued commands applied on the worker thread. Snapshots are stamped with a monotonic timestamp
   and carry a stable pack identity (BMS unique ID), so nothing downstream keys on port or
   address: `BatterySnapshot` (per pack: voltage, current, hi-res SoC, SoH, capacities, cell
   voltages, balancing flags, cell/MOSFET/ambient temperatures, FET states, fault/alarm flags,
@@ -464,24 +465,21 @@ Next tasks, in priority order:
 - **Per-pack SoC reset timing**: keep current behavior (reset when the bank enters
   FloatTransition).
 
-## Open design questions
+## Resolved design questions
 
-- **Synchronous serial I/O in the GLib main loop.** All polling runs inside the 1 s cycle
-  callback. Bounds: a dark pack blocks the loop ~1.5–3 s per cycle (the `SerialLink` deadline
-  is only checked after a blocking read, so the worst case is about twice the 1.5 s timeout);
-  discovery retries under serial interference can block up to 60 s per required command and
-  re-run every 30 s while any configured pack is undiscovered. While blocked, D-Bus requests
-  (GUI/VRM reads, the trip-reset write) wait, SIGTERM handling is delayed, and the shunt is not
-  read — its 30 s staleness budget absorbs realistic stalls. Interference is rare outside the
-  first minute after service start (udev keeps serial-starter off the ports), and with one
-  port the bounds are acceptable; but worst-case stalls stack linearly with added ports.
-  **It already bit once**: the raw status window's live slave reads pushed the cycle past the
-  1 s timer interval, the permanently-overdue repeating timer left the loop no idle time, and
-  starved D-Bus method dispatch (~23 s per call) made vrmlogger's 25 s scans time out — the
-  pack services silently vanished from VRM while signals (Cerbo UI) kept flowing. Mitigated
-  by re-arming the cycle one-shot after completion (`_schedule_cycle`), which bounds D-Bus
-  latency to about one cycle at the cost of the cadence becoming interval + cycle duration
-  (~3.5 s today). The real fix stays: thread the pollers (one thread per port — packs on a
-  shared port remain strictly sequential) behind the immutable-snapshot handoff, restoring
-  the 1 s cadence; do this before adding a second battery port, or sooner if the slower
-  cadence bothers.
+- **Serial I/O never runs on the GLib main loop** (was: "synchronous serial I/O in the GLib
+  main loop", and it bit): the raw status window's live slave reads pushed the blocking
+  cycle past the 1 s timer interval; a permanently-overdue repeating timer leaves the loop
+  no idle time, and starved D-Bus method dispatch (~23 s per call, measured) made
+  vrmlogger's 25 s device scans time out — the pack services silently vanished from VRM
+  while outbound signals kept the Cerbo UI looking healthy. Now each port's poller runs on
+  its own worker thread (`acquisition/workers.py`, one thread per port — packs on a shared
+  port stay strictly sequential), discovery retries and interference waits included; the
+  main-loop cycle only picks up snapshots and stays serial-free, so D-Bus answers promptly
+  no matter what the serial side does. Two supporting decisions worth keeping: the cycle
+  timer is one-shot, re-armed in `finally` (a repeating GLib source dies silently if a
+  callback exception escapes — PyGObject swallows it and GLib removes the source), and
+  worker pass failures are counted and escalated by the main loop with the same
+  alarm/restart thresholds as its own cycle failures. Shutdown abandons a worker stuck in a
+  long serial wait after `STOP_JOIN_TIMEOUT_SECONDS` (daemon threads) rather than delaying
+  exit.

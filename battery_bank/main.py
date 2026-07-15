@@ -21,6 +21,7 @@ from gi.repository import GLib
 from battery_bank.acquisition.battery_poller import SERIAL_TIMEOUT_SECONDS, PackPoller
 from battery_bank.acquisition.shunt_poller import SHUNT_BAUD_RATE, SHUNT_SERIAL_TIMEOUT_SECONDS, ShuntPoller
 from battery_bank.acquisition.snapshots import PackInfo
+from battery_bank.acquisition.workers import BatteryPortWorker, SerialWorker, ShuntWorker
 from battery_bank.config import Config, ConfigError, load_config
 from battery_bank.core.bank import BankDecision, BankInputs, ControlState, EventSeverity, step_bank
 from battery_bank.core.history import HistoryState, bank_history_sample, clear_history, pack_history_sample, step_history
@@ -41,7 +42,6 @@ logger = logging.getLogger("battery_bank")
 
 BATTERY_BAUD_RATE = 9600
 POLL_INTERVAL_SECONDS = 1
-DISCOVERY_RETRY_SECONDS = 30
 THERMAL_SAVE_INTERVAL_SECONDS = 2 * 3600.0
 """How often the PTC thermal filter state is worth a flash write; must stay comfortably below
 THERMAL_RESTORE_MAX_AGE_SECONDS."""
@@ -69,12 +69,20 @@ class BatteryBankService:
         # _restore_state() also initializes the persistence trackers (_written_thermal,
         # _history and friends), so it must not be preceded by defaults that would clobber it.
         self._state = self._restore_state()
-        self._pack_pollers = [
-            PackPoller(port, SerialLink(port.device, BATTERY_BAUD_RATE, SERIAL_TIMEOUT_SECONDS), config.cells_per_pack)
+        # All serial I/O lives on the port workers' threads; this loop's cycle only picks up
+        # their immutable snapshots, so D-Bus dispatch is never starved by a blocking read.
+        self._battery_workers = [
+            BatteryPortWorker(
+                port,
+                PackPoller(port, SerialLink(port.device, BATTERY_BAUD_RATE, SERIAL_TIMEOUT_SECONDS), config.cells_per_pack),
+                POLL_INTERVAL_SECONDS,
+            )
             for port in config.battery_ports
         ]
-        self._shunt_poller = (
-            ShuntPoller(SerialLink(config.shunt_port, SHUNT_BAUD_RATE, SHUNT_SERIAL_TIMEOUT_SECONDS)) if config.shunt_port is not None else None
+        self._shunt_worker = (
+            ShuntWorker(ShuntPoller(SerialLink(config.shunt_port, SHUNT_BAUD_RATE, SHUNT_SERIAL_TIMEOUT_SECONDS)), POLL_INTERVAL_SECONDS)
+            if config.shunt_port is not None
+            else None
         )
         self._snapshots: dict[str, BatterySnapshot] = {}
         self._pack_infos: dict[str, PackInfo] = {}
@@ -88,15 +96,20 @@ class BatteryBankService:
         Stays raised until the service restarts cleanly."""
 
     def run(self) -> None:
-        self._discover()
+        for worker in self._workers():
+            worker.start()
         self._schedule_cycle()
-        GLib.timeout_add_seconds(DISCOVERY_RETRY_SECONDS, self._discover)
         signal.signal(signal.SIGTERM, lambda *_: self._mainloop.quit())
         signal.signal(signal.SIGINT, lambda *_: self._mainloop.quit())
         self._mainloop.run()
+        for worker in self._workers():
+            worker.stop()
         # A clean shutdown flushes the cadence-limited history, so routine restarts lose nothing.
         self._persist(fresh_history_due=True)
         logger.info("Main loop stopped, exiting")
+
+    def _workers(self) -> list[SerialWorker]:
+        return [*self._battery_workers, *([self._shunt_worker] if self._shunt_worker is not None else [])]
 
     def _restore_state(self) -> ControlState:
         try:
@@ -114,30 +127,21 @@ class BatteryBankService:
         self._history_written_at_wall = time.time()
         return restore_control_state(persisted, self._config, time.monotonic(), time.time())
 
-    def _discover(self) -> bool:
-        for poller in self._pack_pollers:
-            for info in poller.discover().values():
-                if info.unique_id not in self._pack_infos:
-                    self._pack_infos[info.unique_id] = info
-        expected = sum(len(port.pack_addresses) for port in self._config.battery_ports)
-        # Keep retrying periodically until every configured pack is found; step_bank alarms
-        # about the incomplete picture once the startup grace expires.
-        return len(self._pack_infos) < expected
-
     def _schedule_cycle(self) -> None:
         """One-shot scheduling, re-armed after each completed cycle — never a repeating
-        timer: a cycle's blocking serial I/O can exceed POLL_INTERVAL_SECONDS, and a
-        permanently-overdue repeating timer leaves the GLib loop no idle time, starving
-        incoming D-Bus method calls (vrmlogger's device scan then times out and skips the
-        services, silently dropping them from VRM). Re-arming after completion guarantees an
-        idle window every cycle, bounding D-Bus latency to about one cycle."""
+        timer: a repeating GLib source dies silently if a callback exception ever escapes
+        (PyGObject swallows it and GLib removes the source), and it starves D-Bus dispatch
+        whenever a cycle outlives the interval (which is how the pack services once silently
+        vanished from VRM, back when the cycle still did serial I/O)."""
         GLib.timeout_add_seconds(POLL_INTERVAL_SECONDS, self._cycle)
 
     def _cycle(self) -> bool:
         keep_running = True
         try:
-            self._cycle_inner()
-            self._consecutive_cycle_failures = 0
+            keep_running = self._check_worker_health()
+            if keep_running:
+                self._cycle_inner()
+                self._consecutive_cycle_failures = 0
         except Exception:
             keep_running = self._handle_cycle_failure()
         finally:
@@ -149,26 +153,40 @@ class BatteryBankService:
         return False
 
     def _handle_cycle_failure(self) -> bool:
-        """Returns False only after a deliberate shutdown: report & restart via the
-        supervisor. If the error-state publishing raises, the cycle stays armed and this
-        runs again next cycle."""
         logger.exception("Cycle failed")
         self._consecutive_cycle_failures += 1
         if self._consecutive_cycle_failures >= CYCLE_FAILURES_BEFORE_ALARM:
             self._service_internal_alarm = True
         if self._consecutive_cycle_failures >= MAX_CONSECUTIVE_CYCLE_FAILURES:
-            logger.error("%d consecutive cycle failures; exiting for the supervisor to restart", self._consecutive_cycle_failures)
-            if self._aggregate_service is not None:
-                self._aggregate_service.set_error(VICTRON_STATE_ERROR, 0)
-            self._mainloop.quit()
-            return False
+            return self._report_and_restart(f"{self._consecutive_cycle_failures} consecutive cycle failures")
         return True
 
+    def _check_worker_health(self) -> bool:
+        """Escalates persistent port-worker pass failures exactly like the loop's own cycle
+        failures: they run the same per-cycle acquisition this loop ran before it was
+        threaded, so the same alarm and restart thresholds apply."""
+        worst = max(worker.consecutive_failures() for worker in self._workers())
+        if worst >= CYCLE_FAILURES_BEFORE_ALARM:
+            self._service_internal_alarm = True
+        if worst >= MAX_CONSECUTIVE_CYCLE_FAILURES:
+            return self._report_and_restart(f"a port worker failed {worst} consecutive passes")
+        return True
+
+    def _report_and_restart(self, reason: str) -> bool:
+        """Report & restart via the supervisor. Returns False (stop cycling) only after the
+        deliberate shutdown; if the error-state publishing raises, the cycle stays armed and
+        the escalation runs again next cycle."""
+        logger.error("%s; exiting for the supervisor to restart", reason)
+        if self._aggregate_service is not None:
+            self._aggregate_service.set_error(VICTRON_STATE_ERROR, 0)
+        self._mainloop.quit()
+        return False
+
     def _cycle_inner(self) -> None:
-        for poller in self._pack_pollers:
-            for snapshot in poller.poll():
-                self._snapshots[snapshot.identity.unique_id] = snapshot
-        shunt = self._shunt_poller.poll() if self._shunt_poller is not None else None
+        for worker in self._battery_workers:
+            self._pack_infos.update(worker.infos())
+            self._snapshots.update(worker.snapshots())
+        shunt = self._shunt_worker.snapshot() if self._shunt_worker is not None else None
 
         inputs = BankInputs(packs=tuple(self._snapshots.values()), shunt=shunt)
         self._state, decision, events = step_bank(self._config, self._state, inputs, time.monotonic())
@@ -253,8 +271,8 @@ class BatteryBankService:
         )
 
     def _request_soc_reset(self, unique_id: str, soc_percent: float = SOC_RESET_PERCENT) -> bool:
-        for poller in self._pack_pollers:
-            if poller.request_soc_reset(unique_id, soc_percent):
+        for worker in self._battery_workers:
+            if worker.request_soc_reset(unique_id, soc_percent):
                 logger.info("SoC reset to %.1f%% requested for pack %s", soc_percent, unique_id)
                 return True
         logger.warning("SoC reset refused for pack %s", unique_id)

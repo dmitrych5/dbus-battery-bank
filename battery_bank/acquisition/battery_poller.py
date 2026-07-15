@@ -191,6 +191,16 @@ class PackPoller:
             for command in (up16s_raw_window.RawStatus, up16s.PackParams2)
         )
 
+    def resettable_pack_ids(self) -> frozenset[str]:
+        """The discovered packs request_soc_reset would currently accept (SetSoc not learned
+        unavailable) — exported by the port worker so acceptance can be judged without
+        touching the poller from another thread."""
+        return frozenset(
+            identity.unique_id
+            for address, identity in self._identities.items()
+            if self._availability.status(address, up16s.SetSoc) is not AvailabilityStatus.UNAVAILABLE
+        )
+
     def request_soc_reset(self, unique_id: str, soc_percent: float) -> bool:
         """Queues a SoC write for the next poll. SetSoc availability is learned from its own
         write attempts — PackParams2's verdict says nothing about it, because that command can
