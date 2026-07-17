@@ -15,7 +15,7 @@
 set -e
 cd "$(dirname "$0")/.."
 
-HOST=${1:?usage: scripts/deploy.sh user@cerbo-host [ssh-command]}
+HOST=${1:?usage: scripts/deploy.sh user@cerbo-host optional-ssh-command}
 SSH_CMD=${2:-ssh}
 APP_DIR=/data/apps/dbus-battery-bank
 
