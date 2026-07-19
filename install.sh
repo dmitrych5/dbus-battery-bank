@@ -38,6 +38,7 @@ echo "Stopping the old stack (reversible; see revert.sh)..."
 # Keep serial-starter from launching dbus-serialbattery for the battery port.
 if [ -f "$SERIAL_STARTER_CONF" ]; then
     svc -d /service/serial-starter
+    mkdir -p "$BACKUP_DIR"
     mv "$SERIAL_STARTER_CONF" "$BACKUP_DIR/"
     svc -u /service/serial-starter
     echo "|- Moved dbus-serialbattery serial-starter config to $BACKUP_DIR/"
