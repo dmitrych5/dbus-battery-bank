@@ -1,6 +1,7 @@
 /*
 ** Copyright (C) 2023 Victron Energy B.V.
 ** See LICENSE.txt for license information.
+** This code is based on Victron Energy code.
 **
 ** dbus-battery-bank: for this project's services (aggregate 0xBA44, packs 0xBA77) the former
 ** "dbus-serialbattery - General" page is folded into this main page (overview and temperature

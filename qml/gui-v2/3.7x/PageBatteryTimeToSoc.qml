@@ -1,6 +1,7 @@
 /*
 ** Copyright (C) 2023 Victron Energy B.V.
 ** See LICENSE.txt for license information.
+** This code is based on Victron Energy code.
 */
 
 import QtQuick

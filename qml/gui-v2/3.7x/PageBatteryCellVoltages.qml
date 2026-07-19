@@ -1,6 +1,7 @@
 /*
 ** Copyright (C) 2025 Victron Energy B.V.
 ** See LICENSE.txt for license information.
+** This code is based on Victron Energy code.
 **
 ** dbus-battery-bank: cell tile coloring marks a balancing cell (orange, takes precedence)
 ** and otherwise the cells matching the pack maximum (red) and minimum (blue).

@@ -1,6 +1,7 @@
 /*
 ** Copyright (C) 2023 Victron Energy B.V.
 ** See LICENSE.txt for license information.
+** This code is based on Victron Energy code.
 **
 ** dbus-battery-bank: for the aggregate (ProductId 0xBA44) the capacity row is hidden — the
 ** main battery page shows it under the Overview row. Otherwise stock.

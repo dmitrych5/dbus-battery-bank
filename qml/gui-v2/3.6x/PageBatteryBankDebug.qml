@@ -1,4 +1,7 @@
 /*
+** Part of dbus-battery-bank's GUI-v2 overlay, distributed under the Victron Energy OS
+** license v1 (see LICENSE.txt). This code is based on Victron Energy code.
+**
 ** dbus-battery-bank: the live control diagnostics texts rendered by the driver
 ** (/Info/ChargeModeDebug and friends). The aggregate shows the bank state machine and limit
 ** picture; a pack shows its own contribution to the bank decision, plus the manual SoC reset

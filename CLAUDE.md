@@ -4,7 +4,8 @@ A single Venus OS service that manages a bank of JBD UP16S BMS packs and publish
 `com.victronenergy.battery` D-Bus service for DVCC. It replaces the previously used pair of
 dbus-serialbattery (fork) + dbus-aggregate-batteries. Reference implementations for behavioral
 parity live in `../venus-os_dbus-serialbattery` and `../dbus-aggregate-batteries`; the deployed
-configuration lives in `../dbus-battery-configs/dbus-battery-bank-config.ini`.
+configuration lives in `../dbus-battery-configs/dbus-battery-bank-config.ini`. All `../` paths
+in this document are sibling checkouts on the author's machine, not part of this repository.
 
 The project is designed for one specific installation but keeps the BMS protocol behind a driver
 interface so other battery types could be added later — only where that costs no maintainability.

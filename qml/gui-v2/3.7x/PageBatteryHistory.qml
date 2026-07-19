@@ -1,6 +1,7 @@
 /*
 ** Copyright (C) 2023 Victron Energy B.V.
 ** See LICENSE.txt for license information.
+** This code is based on Victron Energy code.
 **
 ** dbus-battery-bank: based on the stock page, with the rows grouped by data source for this
 ** project's services. The aggregate (ProductId 0xBA44) splits into "Shunt-provided data"
