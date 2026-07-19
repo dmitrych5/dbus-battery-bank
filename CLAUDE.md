@@ -183,21 +183,14 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   `THERMAL_SAVE_INTERVAL_SECONDS`; history: `HISTORY_SAVE_INTERVAL_SECONDS`, plus an immediate
   save on operator clear and a final save on clean shutdown) before persisting; any newly
   persisted value must obey the same rule. Safety latches are exempt — a trip change always
-  writes immediately. Principles behind these rules, for any future persistence design:
-  - Wear is driven by write *operations* at least as much as bytes: each save is a small file
-    plus fsync plus rename, each a journal commit on the eMMC.
-  - Quantization spares flash only while a value is moving (a ramp costs its span divided by
-    the quantum in writes); a value resting at a stable level costs nothing at any precision.
-    So the quantum is sized by restore needs alone — coarseness is free wherever restore
-    rebases conservatively — and a value is persisted only while it carries information: the
-    CVL persists as null while sitting at the stage target, which also keeps a restart from
-    fabricating a recovery ramp when the target sits off the quantum grid.
-  - Values whose only regular change is a rare ratchet or edge (history extremes, counters)
-    need no adaptive cadence: the content-comparison skip already makes their steady-state
-    cost zero, and the cadence cap only bounds the burst while records are actively advancing.
+  writes immediately. Principles behind these rules:
   - **Logging discipline is part of the same budget**: Venus OS symlinks `/var/log` to
     `/data/log` on the eMMC, so every log line is a flash write. Log events and state changes,
     never per-cycle or per-poll chatter.
+  - Wear is driven by write *operations* at least as much as bytes: each save is a small file
+    plus fsync plus rename, each a journal commit on the eMMC.
+  - Values whose only regular change is a rare ratchet or edge (history extremes, counters)
+    need no additional treatment beyond cadence cap: the content-comparison skip already makes their steady-state cost zero, and the cadence cap only bounds the burst while records are actively advancing.
 - Charge-mode state and last-SoC-reset persist across restarts (as the old system did via
   com.victronenergy.settings).
 - DeviceInstance/CustomName via com.victronenergy.settings, Victron-style.
@@ -416,19 +409,9 @@ Hard-won facts from the deployed system; each is a requirement, not trivia:
   protection/warning bitmasks are NOT in the window — PackStatus remains the alarm source.
   Encodings differ from the serialized commands (current offset 30000, not 300000).
 
-## Current status and next steps (as of 2026-07-13)
+## Remaining ideas:
 
-The system is commissioned and permanent: the service runs on the Cerbo, all parity checks
-passed, and the custom browser WASM is built (natively via `scripts/build-wasm-macos.sh`,
-minutes per rebuild thanks to the persistent toolchain) and installed. The operator verified
-the browser UI (the battery pages have since been restructured — see the GUI-v2 QML bullet
-under Publishing).
-
-Next tasks, in priority order:
-
-1. **Simplifications enabled by the merge**: revisit whether master-aggregated limits still add
-   information once all packs are polled in-process; drop if provably redundant.
-2. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
+1. **Diurnal thermal-state restore**: the batteries live in a non-conditioned garage, so the
    temperature at roughly the same time of day yesterday resembles today better than a
    many-hours-old state from today. Idea to explore: every few hours persist per-hour data
    points for the last ~25 hours (25 so the current time of day exists for both today and
@@ -436,28 +419,7 @@ Next tasks, in priority order:
    and last points in the window plus the point matching the launch time of day — to
    reconstruct a better thermal estimate than pure rate extrapolation allows.
 
-Behavior changes to proven battery-handling logic beyond this list are discussed before
-implementation.
-
-## Decided details
-
-- **Ambient temperature UI**: published on `/AirTemperature`, shown for our services as the
-  first tile ("Ambient") of the Temperatures row (other products keep the stock "Air
-  temperature" row); `/Dc/0/Temperature` stays the cell-sensor aggregate ("Cell avg" tile)
-  for VRM/DVCC/stock pages. The temperature tiles' red-highlight-when-limiting checks must
-  keep matching the `LimitSource` limitation strings (they compare lowercased text:
-  "ambient", "cell temperature", "mosfet"); the cell max/min tiles are deliberately not
-  highlighted (the Cell Voltages page colors the extreme cells instead: balancing orange
-  takes precedence, then maximum red / minimum blue). Verify whether VRM logs
-  `/AirTemperature` once live; if not and drift monitoring of ambient is wanted, route it
-  through the contained VRM metric-map module.
-- **Operator reset of latched trips**: a confirmed button on the aggregate's battery page,
-  visible only while `/ProtectionTripped` is 1, backed by a writable dbus path with a change
-  callback — the same proven mechanism as the `/Settings/ResetSocTo` control (which lives at
-  the bottom of the pack "Debug" submenu). The reset emits an Event so it is logged and
-  auditable.
-- **Per-pack SoC reset timing**: keep current behavior (reset when the bank enters
-  FloatTransition).
+2. VRM does not log `/AirTemperature`. A separate "virtual" temperature sensor could be added if ambient temperature monitoring is needed.
 
 ## Resolved design questions
 
