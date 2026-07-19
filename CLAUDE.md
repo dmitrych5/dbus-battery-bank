@@ -183,7 +183,21 @@ another; no layer below "publishing" touches D-Bus; no layer except "transport" 
   `THERMAL_SAVE_INTERVAL_SECONDS`; history: `HISTORY_SAVE_INTERVAL_SECONDS`, plus an immediate
   save on operator clear and a final save on clean shutdown) before persisting; any newly
   persisted value must obey the same rule. Safety latches are exempt — a trip change always
-  writes immediately.
+  writes immediately. Principles behind these rules, for any future persistence design:
+  - Wear is driven by write *operations* at least as much as bytes: each save is a small file
+    plus fsync plus rename, each a journal commit on the eMMC.
+  - Quantization spares flash only while a value is moving (a ramp costs its span divided by
+    the quantum in writes); a value resting at a stable level costs nothing at any precision.
+    So the quantum is sized by restore needs alone — coarseness is free wherever restore
+    rebases conservatively — and a value is persisted only while it carries information: the
+    CVL persists as null while sitting at the stage target, which also keeps a restart from
+    fabricating a recovery ramp when the target sits off the quantum grid.
+  - Values whose only regular change is a rare ratchet or edge (history extremes, counters)
+    need no adaptive cadence: the content-comparison skip already makes their steady-state
+    cost zero, and the cadence cap only bounds the burst while records are actively advancing.
+  - **Logging discipline is part of the same budget**: Venus OS symlinks `/var/log` to
+    `/data/log` on the eMMC, so every log line is a flash write. Log events and state changes,
+    never per-cycle or per-poll chatter.
 - Charge-mode state and last-SoC-reset persist across restarts (as the old system did via
   com.victronenergy.settings).
 - DeviceInstance/CustomName via com.victronenergy.settings, Victron-style.

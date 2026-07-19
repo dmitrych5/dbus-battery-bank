@@ -26,12 +26,13 @@ from battery_bank.core.protections import ProtectionState, ThermalInertiaState, 
 
 STATE_FILE_VERSION = 1
 
-CVL_PERSIST_QUANTUM_VOLTS = 0.05
+CVL_PERSIST_QUANTUM_VOLTS = 0.5
 """The CVL ramps continuously (float transition, controller recovery), so persisting it exactly
 would rewrite the flash every control cycle for the whole ramp. Flooring to this quantum bounds
-writes to one per quantum crossed, and flooring errs low — a slightly lower restored CVL is
-always the safe direction. A reduction smaller than one quantum restores as unreduced, which
-the fresh recovery hold on restore absorbs."""
+a ramp's writes to its span divided by the quantum, and flooring errs low — a slightly lower
+restored CVL is always the safe direction: a float transition resumes at most one quantum ahead
+in its downward ramp, and a controller-reduced CVL climbs back at CVL_RECOVERY_VOLTS_PER_SECOND
+after its fresh recovery hold."""
 
 
 class StateFileError(Exception):
@@ -57,6 +58,10 @@ class PersistedState:
     tripped: frozenset[TripKind] = frozenset()
     charge_stage: ChargeStage = ChargeStage.BULK
     cvl_volts: float | None = None
+    """Persisted (quantized) only while the CVL deviates from the stage's natural target —
+    controller-reduced or mid float-transition; None means "at target", which restore
+    re-derives. A stable at-target CVL therefore never rewrites the file, and a restart never
+    fabricates a recovery ramp just because the target sits off the quantum grid."""
     thermal: PersistedThermalState | None = None
     history: HistoryValues = HistoryValues()
     """The bank's driver-computed history. The main loop cadence-limits how often a fresh
@@ -70,10 +75,12 @@ def to_persisted(
     state: ControlState, history: HistoryValues, pack_history: dict[str, HistoryValues], now_wall_seconds: float
 ) -> PersistedState:
     thermal = state.protections.thermal
+    charge = state.charge_stage
+    cvl_informative = charge.cvl_reduced_at is not None or charge.stage is ChargeStage.FLOAT_TRANSITION
     return PersistedState(
         tripped=state.protections.tripped,
-        charge_stage=state.charge_stage.stage,
-        cvl_volts=_quantized_cvl(state.charge_stage.cvl_volts),
+        charge_stage=charge.stage,
+        cvl_volts=_quantized_cvl(charge.cvl_volts) if cvl_informative else None,
         history=history,
         pack_history=dict(sorted(pack_history.items())),
         thermal=(

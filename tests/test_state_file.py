@@ -118,16 +118,32 @@ class TestRestore:
         state, _, _ = step_bank(CONFIG, ControlState(), healthy_inputs(), now_monotonic=1001.0)
         persisted = to_persisted(state, HistoryValues(), {}, now_wall_seconds=5000.0)
         assert persisted.charge_stage is ChargeStage.BULK
-        assert persisted.cvl_volts == pytest.approx(57.6)
+        assert persisted.cvl_volts is None
         assert persisted.tripped == frozenset()
 
     def test_cvl_persists_floored_to_the_quantum(self):
         state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=55.749))
-        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(55.70)
+        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(55.5)
 
     def test_cvl_exactly_on_a_quantum_is_not_floored_down(self):
-        state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=57.6))
-        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(57.6)
+        state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.FLOAT_TRANSITION, cvl_volts=55.5))
+        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(55.5)
+
+    def test_at_target_cvl_persists_as_none(self):
+        """A CVL sitting at the stage target carries no information; persisting it would also
+        fabricate a recovery ramp on restore whenever the target sits off the quantum grid."""
+        state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.BULK, cvl_volts=57.6))
+        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts is None
+
+    def test_controller_reduced_cvl_persists(self):
+        state = ControlState(charge_stage=ChargeStageState(stage=ChargeStage.BULK, cvl_volts=57.0, cvl_reduced_at=500.0))
+        assert to_persisted(state, HistoryValues(), {}, now_wall_seconds=0.0).cvl_volts == pytest.approx(57.0)
+
+    def test_restore_without_cvl_starts_at_the_stage_target(self):
+        restored = restore_control_state(PersistedState(charge_stage=ChargeStage.BULK), CONFIG, now_monotonic=1000.0, now_wall_seconds=0.0)
+        assert restored.charge_stage.cvl_reduced_at is None
+        _, decision, _ = step_bank(CONFIG, restored, healthy_inputs(), now_monotonic=1001.0)
+        assert decision.cvl_volts == pytest.approx(57.6)
 
     def test_cvl_ramp_within_one_quantum_does_not_rewrite_the_file(self, tmp_path):
         """The float-transition ramp changes the CVL every control cycle; flash writes must be
@@ -139,8 +155,8 @@ class TestRestore:
         store = StateFile(tmp_path / "state.json")
         assert store.save(to_persisted(state_at(55.749), HistoryValues(), {}, now_wall_seconds=0.0)) is True
         assert store.save(to_persisted(state_at(55.748), HistoryValues(), {}, now_wall_seconds=1.0)) is False
-        assert store.save(to_persisted(state_at(55.701), HistoryValues(), {}, now_wall_seconds=2.0)) is False
-        assert store.save(to_persisted(state_at(55.699), HistoryValues(), {}, now_wall_seconds=3.0)) is True
+        assert store.save(to_persisted(state_at(55.501), HistoryValues(), {}, now_wall_seconds=2.0)) is False
+        assert store.save(to_persisted(state_at(55.499), HistoryValues(), {}, now_wall_seconds=3.0)) is True
 
 
 class TestThermalRestore:
